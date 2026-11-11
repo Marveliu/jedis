@@ -1,30 +1,61 @@
 package redis.clients.jedis.commands.jedis;
 
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
-
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
-import org.hamcrest.CoreMatchers;
-import org.hamcrest.Matcher;
-import org.junit.Test;
+import io.redis.test.annotations.SinceRedisVersion;
+import io.redis.test.annotations.ConditionalOnEnv;
+import io.redis.test.utils.RedisVersion;
+import org.hamcrest.MatcherAssert;
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
+
 
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.RedisProtocol;
 import redis.clients.jedis.args.FlushMode;
+import redis.clients.jedis.args.FunctionRestorePolicy;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.exceptions.JedisNoScriptException;
-import redis.clients.jedis.util.ClientKillerUtil;
-import redis.clients.jedis.util.SafeEncoder;
+import redis.clients.jedis.resps.FunctionStats;
+import redis.clients.jedis.resps.LibraryInfo;
+import redis.clients.jedis.util.*;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+
+@ParameterizedClass
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#jedisRespVersions")
+@Tag("integration")
 public class ScriptingCommandsTest extends JedisCommandsTestBase {
+
+  public ScriptingCommandsTest(RedisProtocol redisProtocol) {
+    super(redisProtocol);
+  }
+
+  @BeforeEach
+  @Override
+  public void setUp() throws Exception {
+    super.setUp();
+    if (RedisVersionUtil.getRedisVersion(jedis)
+            .isGreaterThanOrEqualTo(RedisVersion.V7_0_0)) {
+      jedis.functionFlush();
+    }
+  }
 
   final byte[] bfoo = { 0x01, 0x02, 0x03, 0x04 };
   final byte[] bfoo1 = { 0x01, 0x02, 0x03, 0x04, 0x0A };
@@ -38,6 +69,7 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
 
   @SuppressWarnings("unchecked")
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void evalMultiBulk() {
     String script = "return {KEYS[1],KEYS[2],ARGV[1],ARGV[2],ARGV[3]}";
     List<String> keys = new ArrayList<String>();
@@ -61,6 +93,7 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
 
   @SuppressWarnings("unchecked")
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void evalMultiBulkWithBinaryJedis() {
     String script = "return {KEYS[1],KEYS[2],ARGV[1],ARGV[2],ARGV[3]}";
     List<byte[]> keys = new ArrayList<byte[]>();
@@ -103,7 +136,7 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
 
     Long response = (Long) jedis.eval(script, keys, new ArrayList<String>());
 
-    assertEquals(new Long(2), response);
+    assertEquals(Long.valueOf(2), response);
   }
 
   @Test
@@ -111,8 +144,8 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
     String script = "return { {KEYS[1]} , {2} }";
     List<?> results = (List<?>) jedis.eval(script, 1, "key1");
 
-    assertThat((List<String>) results.get(0), listWithItem("key1"));
-    assertThat((List<Long>) results.get(1), listWithItem(2L));
+    MatcherAssert.assertThat((List<String>) results.get(0), Matchers.hasItem("key1"));
+    MatcherAssert.assertThat((List<Long>) results.get(1), Matchers.hasItem(2L));
   }
 
   @Test
@@ -121,6 +154,21 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
     List<String> keys = new ArrayList<String>();
     keys.add("key1");
     String response = (String) jedis.eval(script, keys, new ArrayList<String>());
+
+    assertEquals("key1", response);
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void evalReadonly() {
+    String script = "return KEYS[1]";
+    List<String> keys = new ArrayList<String>();
+    keys.add("key1");
+
+    List<String> args = new ArrayList<String>();
+    args.add("first");
+
+    String response = (String) jedis.evalReadonly(script, keys, args);
 
     assertEquals("key1", response);
   }
@@ -135,6 +183,17 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void evalshaReadonly() {
+    jedis.set("foo", "bar");
+    jedis.eval("return redis.call('get','foo')");
+    String result = (String) jedis.evalshaReadonly("6b1bf486c81ceb7edf3c093f4c48582e38c0e791",
+            Collections.emptyList(), Collections.emptyList());
+
+    assertEquals("bar", result);
+  }
+
+  @Test
   public void evalshaBinary() {
     jedis.set(SafeEncoder.encode("foo"), SafeEncoder.encode("bar"));
     jedis.eval(SafeEncoder.encode("return redis.call('get','foo')"));
@@ -144,9 +203,22 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
     assertArrayEquals(SafeEncoder.encode("bar"), result);
   }
 
-  @Test(expected = JedisNoScriptException.class)
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void evalshaReadonlyBinary() {
+    jedis.set(SafeEncoder.encode("foo"), SafeEncoder.encode("bar"));
+    jedis.eval(SafeEncoder.encode("return redis.call('get','foo')"));
+    byte[] result = (byte[]) jedis.evalshaReadonly(SafeEncoder.encode("6b1bf486c81ceb7edf3c093f4c48582e38c0e791"),
+            Collections.emptyList(), Collections.emptyList());
+
+    assertArrayEquals(SafeEncoder.encode("bar"), result);
+  }
+
+  @Test
   public void evalshaShaNotFound() {
-    jedis.evalsha("ffffffffffffffffffffffffffffffffffffffff");
+    assertThrows(JedisNoScriptException.class, () -> {
+      jedis.evalsha("ffffffffffffffffffffffffffffffffffffffff");
+    });
   }
 
   @Test
@@ -195,9 +267,7 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
   @Test
   public void scriptLoadBinary() {
     jedis.scriptLoad(SafeEncoder.encode("return redis.call('get','foo')"));
-    Boolean exists = jedis
-        .scriptExists(SafeEncoder.encode("6b1bf486c81ceb7edf3c093f4c48582e38c0e791"));
-    assertTrue(exists);
+    assertTrue(jedis.scriptExists(SafeEncoder.encode("6b1bf486c81ceb7edf3c093f4c48582e38c0e791")));
   }
 
   @Test
@@ -210,6 +280,7 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void scriptEvalReturnNullValues() {
     jedis.del("key1");
     jedis.del("key2");
@@ -222,6 +293,7 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void scriptEvalShaReturnNullValues() {
     jedis.del("key1");
     jedis.del("key2");
@@ -235,6 +307,7 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void scriptEvalShaReturnValues() {
     jedis.hset("foo", "foo1", "bar1");
     jedis.hset("foobar", "foo2", "bar2");
@@ -248,6 +321,7 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void scriptEvalShaReturnValuesBinary() {
     jedis.hset(bfoo, bfoo1, bbar1);
     jedis.hset(bfoobar, bfoo2, bbar2);
@@ -280,7 +354,223 @@ public class ScriptingCommandsTest extends JedisCommandsTestBase {
     deadClient.close();
   }
 
-  private <T> Matcher<Iterable<? super T>> listWithItem(T expected) {
-    return CoreMatchers.<T> hasItem(equalTo(expected));
+  @Test
+  public void emptyLuaTableReply() {
+    Object reply = jedis.eval("return {}");
+    assertEquals(Collections.emptyList(), reply);
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void functionLoadAndDelete() {
+    String engine = "Lua";
+    String library = "mylib";
+    String function = "redis.register_function('myfunc', function(keys, args) return args[1] end)";
+    String functionCode = String.format("#!%s name=%s \n %s", engine, library, function);
+
+    assertEquals(library, jedis.functionLoad(functionCode));
+    assertEquals(library, jedis.functionLoadReplace(functionCode));
+
+    assertEquals("OK", jedis.functionDelete(library));
+
+    // Binary
+    assertEquals(library, jedis.functionLoad(functionCode.getBytes()));
+    assertEquals(library, jedis.functionLoadReplace(functionCode.getBytes()));
+
+    assertEquals("OK", jedis.functionDelete(library.getBytes()));
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void functionFlush() {
+    String engine = "Lua";
+    String library = "mylib";
+    String function = "redis.register_function('myfunc', function(keys, args) return args[1] end)";
+    String functionCode = String.format("#!%s name=%s \n %s", engine, library, function);
+
+    assertEquals(library, jedis.functionLoad(functionCode));
+    jedis.functionFlush();
+    assertEquals(library, jedis.functionLoad(functionCode));
+    jedis.functionFlush(FlushMode.ASYNC);
+    assertEquals(library, jedis.functionLoad(functionCode));
+    jedis.functionFlush(FlushMode.SYNC);
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void functionList() {
+    String engine = "LUA";
+    String library = "mylib";
+    String function = "redis.register_function('myfunc', function(keys, args) return args[1] end)";
+    String functionCode = String.format("#!%s name=%s \n %s", engine, library, function);
+    jedis.functionLoad(functionCode);
+
+    LibraryInfo response = jedis.functionList().get(0);
+    assertEquals(library, response.getLibraryName());
+    assertEquals(engine, response.getEngine());
+    assertEquals(1, response.getFunctions().size());
+
+    // check function info
+    Map func = response.getFunctions().get(0);
+    assertEquals("myfunc", func.get("name"));
+    assertNull(func.get("description"));
+    assertTrue(((List) func.get("flags")).isEmpty());
+
+    // check WITHCODE
+    response = jedis.functionListWithCode().get(0);
+    assertEquals("myfunc", func.get("name"));
+    assertEquals(functionCode, response.getLibraryCode());
+
+    // check with LIBRARYNAME
+    response = jedis.functionList(library).get(0);
+    assertEquals(library, response.getLibraryName());
+
+    // check with code and with LIBRARYNAME
+    response = jedis.functionListWithCode(library).get(0);
+    assertEquals(library, response.getLibraryName());
+    assertEquals(functionCode, response.getLibraryCode());
+
+    // Binary
+    if (protocol != RedisProtocol.RESP3) {
+
+      List<Object> bresponse = (List<Object>) jedis.functionListBinary().get(0);
+      assertArrayEquals(library.getBytes(), (byte[]) bresponse.get(1));
+
+      bresponse = (List<Object>) jedis.functionListWithCodeBinary().get(0);
+      assertArrayEquals(library.getBytes(), (byte[]) bresponse.get(1));
+      assertNotNull(bresponse.get(7));
+
+      bresponse = (List<Object>) jedis.functionList(library.getBytes()).get(0);
+      assertArrayEquals(library.getBytes(), (byte[]) bresponse.get(1));
+
+      bresponse = (List<Object>) jedis.functionListWithCode(library.getBytes()).get(0);
+      assertArrayEquals(library.getBytes(), (byte[]) bresponse.get(1));
+      assertNotNull(bresponse.get(7));
+    } else {
+
+      List<KeyValue> bresponse = (List<KeyValue>) jedis.functionListBinary().get(0);
+      assertArrayEquals(library.getBytes(), (byte[]) bresponse.get(0).getValue());
+
+      bresponse = (List<KeyValue>) jedis.functionListWithCodeBinary().get(0);
+      assertArrayEquals(library.getBytes(), (byte[]) bresponse.get(0).getValue());
+      assertNotNull(bresponse.get(3));
+
+      bresponse = (List<KeyValue>) jedis.functionList(library.getBytes()).get(0);
+      assertArrayEquals(library.getBytes(), (byte[]) bresponse.get(0).getValue());
+
+      bresponse = (List<KeyValue>) jedis.functionListWithCode(library.getBytes()).get(0);
+      assertArrayEquals(library.getBytes(), (byte[]) bresponse.get(0).getValue());
+      assertNotNull(bresponse.get(3));
+    }
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void functionDumpRestore() {
+    String engine = "Lua";
+    String library = "mylib";
+    String function = "redis.register_function('myfunc', function(keys, args) return args[1] end)";
+
+    jedis.functionLoad(String.format("#!%s name=%s \n %s", engine, library, function));
+    byte[] payload = jedis.functionDump();
+    jedis.functionFlush();
+    assertEquals("OK", jedis.functionRestore(payload));
+    jedis.functionFlush();
+    assertEquals("OK", jedis.functionRestore(payload, FunctionRestorePolicy.FLUSH));
+    jedis.functionFlush();
+    assertEquals("OK", jedis.functionRestore(payload, FunctionRestorePolicy.APPEND));
+    jedis.functionFlush();
+    assertEquals("OK", jedis.functionRestore(payload, FunctionRestorePolicy.REPLACE));
+    jedis.functionFlush();
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void functionStatsWithoutRunning() {
+    String engine = "Lua";
+    String library = "mylib";
+    String function = "redis.register_function('myfunc', function(keys, args) return args[1] end)";
+
+    jedis.functionLoad(String.format("#!%s name=%s \n %s", engine, library, function));
+    FunctionStats stats = jedis.functionStats();
+    assertNull(stats.getRunningScript());
+    assertEquals(1, stats.getEngines().size());
+  }
+//
+//  @Test
+//  public void functionStatsWithRunning() throws InterruptedException {
+//    jedis.functionFlush();
+//    function = "redis.register_function('myfunc', function(keys, args)\n local a = 1 while true do a = a + 1 end \nend)";
+//
+//    jedis.functionLoad(String.format("#!%s name=%s \n %s", engine, library, function));
+//    jedis.fcall("myfunc", new ArrayList<>(), new ArrayList<>());
+//    stats = jedis.functionStats();
+//    assertNotNull(stats.getScript());
+//    assertEquals("myfunc", stats.getScript().getName());
+//  }
+//
+//  @Test
+//  public void functionKill() {
+//    String engine = "Lua";
+//    String library = "mylib";
+//    String function = "redis.register_function('myfunc', function(keys, args)\n local a = 1 while true do a = a + 1 end \nend)";
+//
+//    jedis.functionLoad(String.format("#!%s name=%s \n %s", engine, library, function));
+//    jedis.fcall("myfunc", Collections.emptyList(), Collections.emptyList());
+//    assertEquals("OK", jedis.functionKill());
+//  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void functionKillWithoutRunningFunction() {
+    String engine = "Lua";
+    String library = "mylib";
+    String function = "redis.register_function('myfunc', function(keys, args)\n local a = 1 while true do a = a + 1 end \nend)";
+
+    jedis.functionLoad(String.format("#!%s name=%s \n %s", engine, library, function));
+    try {
+      jedis.functionKill();
+      fail("Should get NOTBUSY error.");
+    } catch (JedisDataException jde) {
+      assertEquals("NOTBUSY No scripts in execution right now.", jde.getMessage());
+    }
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void fcall() {
+    String engine = "Lua";
+    String library = "mylib";
+    String function = "redis.register_function('myfunc', function(keys, args) return args end)";
+
+    jedis.functionLoad(String.format("#!%s name=%s \n %s", engine, library, function));
+    List<String> args = Arrays.asList("hello");
+    assertEquals(args, jedis.fcall("myfunc", Collections.emptyList(), args));
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void fcallBinary() {
+    String engine = "Lua";
+    String library = "mylib";
+    String function = "redis.register_function('myfunc', function(keys, args) return args[1] end)";
+
+    jedis.functionLoad(String.format("#!%s name=%s \n %s", engine, library, function));
+    List<byte[]> bargs = Arrays.asList("hello".getBytes());
+    assertArrayEquals("hello".getBytes(), (byte[]) jedis.fcall("myfunc".getBytes(), Collections.emptyList(), bargs));
+  }
+
+  @Test
+  @SinceRedisVersion(value = "7.0.0")
+  public void fcallReadonly() {
+    String engine = "Lua";
+    String library = "mylib";
+    String function = "redis.register_function{function_name='noop', callback=function() return 1 end, flags={ 'no-writes' }}";
+    jedis.functionLoad(String.format("#!%s name=%s \n %s", engine, library, function));
+
+    assertEquals(Long.valueOf(1), jedis.fcallReadonly("noop", Collections.emptyList(), Collections.emptyList()));
+
+    // Binary
+    assertEquals(Long.valueOf(1), jedis.fcallReadonly("noop".getBytes(), Collections.emptyList(), Collections.emptyList()));
   }
 }

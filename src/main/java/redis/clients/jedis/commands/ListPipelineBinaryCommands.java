@@ -5,7 +5,9 @@ import java.util.List;
 import redis.clients.jedis.Response;
 import redis.clients.jedis.args.ListDirection;
 import redis.clients.jedis.args.ListPosition;
+import redis.clients.jedis.params.LMoveMParams;
 import redis.clients.jedis.params.LPosParams;
+import redis.clients.jedis.util.KeyValue;
 
 public interface ListPipelineBinaryCommands {
 
@@ -41,17 +43,17 @@ public interface ListPipelineBinaryCommands {
 
   Response<Long> linsert(byte[] key, ListPosition where, byte[] pivot, byte[] value);
 
-  Response<Long> lpushx(byte[] key, byte[]... arg);
+  Response<Long> lpushx(byte[] key, byte[]... args);
 
-  Response<Long> rpushx(byte[] key, byte[]... arg);
+  Response<Long> rpushx(byte[] key, byte[]... args);
 
   Response<List<byte[]>> blpop(int timeout, byte[]... keys);
 
-  Response<List<byte[]>> blpop(double timeout, byte[]... keys);
+  Response<KeyValue<byte[], byte[]>> blpop(double timeout, byte[]... keys);
 
   Response<List<byte[]>> brpop(int timeout, byte[]... keys);
 
-  Response<List<byte[]>> brpop(double timeout, byte[]... keys);
+  Response<KeyValue<byte[], byte[]>> brpop(double timeout, byte[]... keys);
 
   Response<byte[]> rpoplpush(byte[] srckey, byte[] dstkey);
 
@@ -61,4 +63,42 @@ public interface ListPipelineBinaryCommands {
 
   Response<byte[]> blmove(byte[] srcKey, byte[] dstKey, ListDirection from, ListDirection to, double timeout);
 
+  /**
+   * Pipeline variant of
+   * {@link ListBinaryCommands#lmovem(byte[], byte[], ListDirection, ListDirection)}.
+   * @since 8.0
+   */
+  Response<List<byte[]>> lmovem(byte[] srcKey, byte[] dstKey, ListDirection from, ListDirection to);
+
+  /**
+   * Pipeline variant of
+   * {@link ListBinaryCommands#lmovem(byte[], byte[], ListDirection, ListDirection, LMoveMParams)}.
+   * @since 8.0
+   */
+  Response<List<byte[]>> lmovem(byte[] srcKey, byte[] dstKey, ListDirection from, ListDirection to,
+      LMoveMParams params);
+
+  /**
+   * Pipeline variant of
+   * {@link ListBinaryCommands#blmovem(byte[], byte[], ListDirection, ListDirection, double)}.
+   * @since 8.0
+   */
+  Response<List<byte[]>> blmovem(byte[] srcKey, byte[] dstKey, ListDirection from, ListDirection to,
+      double timeout);
+
+  /**
+   * Pipeline variant of
+   * {@link ListBinaryCommands#blmovem(byte[], byte[], ListDirection, ListDirection, double, LMoveMParams)}.
+   * @since 8.0
+   */
+  Response<List<byte[]>> blmovem(byte[] srcKey, byte[] dstKey, ListDirection from, ListDirection to,
+      double timeout, LMoveMParams params);
+
+  Response<KeyValue<byte[], List<byte[]>>> lmpop(ListDirection direction, byte[]... keys);
+
+  Response<KeyValue<byte[], List<byte[]>>> lmpop(ListDirection direction, int count, byte[]... keys);
+
+  Response<KeyValue<byte[], List<byte[]>>> blmpop(double timeout, ListDirection direction, byte[]... keys);
+
+  Response<KeyValue<byte[], List<byte[]>>> blmpop(double timeout, ListDirection direction, int count, byte[]... keys);
 }

@@ -1,0 +1,73 @@
+---
+
+name: Build and Test using a containerized environment
+run-name: "Build and Test using ${{ github.event.inputs.client_libs_test_image_tag != '' && format('image: {0}', github.event.inputs.client_libs_test_image_tag) || 'a containerized environment' }}"
+
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '**/*.rst'
+    branches:
+      - master
+      - '[0-9].*'
+      - 'feature/**'
+  pull_request:
+    branches:
+      - master
+      - '[0-9].*'
+      - 'feature/**'
+  schedule:
+    - cron: '0 1 * * *' # nightly build
+  workflow_dispatch:
+    inputs:
+      specific_test:
+        description: 'Run specific test(s) (optional)'
+        required: false
+        default: ''
+      client_libs_test_image_tag:
+        description: 'Custom client libs test image tag to use instead of redis_version'
+        required: false
+        default: ''
+jobs:
+
+  build:
+    name: Build and Test
+    if: github.event.inputs.client_libs_test_image_tag == ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Full version set runs only on the nightly schedule; PRs and pushes
+        # test a reduced set (7.2 LTS, 7.4 LTS, 8.2 LTS, 8.8, 8.10 current stable, 8.12 milestone) to keep CI fast.
+        redis_version: ${{ fromJSON(github.event_name == 'schedule'
+          && '["8.12", "8.10", "8.8", "8.6", "8.4", "8.2", "7.4", "7.2"]'
+          || '["8.12", "8.10", "8.8", "8.2", "7.4", "7.2"]') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - uses: ./.github/actions/run-tests
+        with:
+          redis_version: ${{ matrix.redis_version }}
+          specific_test: ${{ github.event.inputs.specific_test || '' }}
+          codecov_token: ${{ secrets.CODECOV_TOKEN }}
+          redis_env_work_dir: ${{ github.workspace }}/redis-env-work
+          redis_env_conf_dir: ${{ github.workspace }}/src/test/resources/env
+
+  build_using_custom_image:
+    name: Build and Test using custom image
+    if: github.event.inputs.client_libs_test_image_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - uses: ./.github/actions/run-tests
+        with:
+          client_libs_test_image_tag: ${{ github.event.inputs.client_libs_test_image_tag }}
+          specific_test: ${{ github.event.inputs.specific_test || '' }}
+          codecov_token: ${{ secrets.CODECOV_TOKEN }}
+          redis_env_work_dir: ${{ github.workspace }}/redis-env-work
+          redis_env_conf_dir: ${{ github.workspace }}/src/test/resources/env

@@ -3,12 +3,15 @@ package redis.clients.jedis.commands;
 import java.util.List;
 import java.util.Set;
 
+import redis.clients.jedis.args.ExpiryOption;
 import redis.clients.jedis.params.MigrateParams;
 import redis.clients.jedis.params.RestoreParams;
 import redis.clients.jedis.params.ScanParams;
 import redis.clients.jedis.params.SortingParams;
 import redis.clients.jedis.resps.ScanResult;
 import redis.clients.jedis.Response;
+import redis.clients.jedis.util.CompareCondition;
+import redis.clients.jedis.args.BlessFlag;
 
 public interface KeyPipelineCommands {
 
@@ -28,11 +31,23 @@ public interface KeyPipelineCommands {
 
   Response<Long> expire(String key, long seconds);
 
+  Response<Long> expire(String key, long seconds, ExpiryOption expiryOption);
+
   Response<Long> pexpire(String key, long milliseconds);
+
+  Response<Long> pexpire(String key, long milliseconds, ExpiryOption expiryOption);
+
+  Response<Long> expireTime(String key);
+
+  Response<Long> pexpireTime(String key);
 
   Response<Long> expireAt(String key, long unixTime);
 
+  Response<Long> expireAt(String key, long unixTime, ExpiryOption expiryOption);
+
   Response<Long> pexpireAt(String key, long millisecondsTimestamp);
+
+  Response<Long> pexpireAt(String key, long millisecondsTimestamp, ExpiryOption expiryOption);
 
   Response<Long> ttl(String key);
 
@@ -46,11 +61,17 @@ public interface KeyPipelineCommands {
 
   Response<Long> sort(String key, String dstkey);
 
-  Response<List<String>> sort(String key, SortingParams sortingParameters);
+  Response<List<String>> sort(String key, SortingParams sortingParams);
 
-  Response<Long> sort(String key, SortingParams sortingParameters, String dstkey);
+  Response<Long> sort(String key, SortingParams sortingParams, String dstkey);
+
+  Response<List<String>> sortReadonly(String key, SortingParams sortingParams);
 
   Response<Long> del(String key);
+
+  Response<Long> delex(String key, CompareCondition condition);
+
+  Response<String> digestKey(String key);
 
   Response<Long> del(String... keys);
 
@@ -87,6 +108,55 @@ public interface KeyPipelineCommands {
   Response<ScanResult<String>> scan(String cursor, ScanParams params);
 
   Response<ScanResult<String>> scan(String cursor, ScanParams params, String type);
+
+  /**
+   * Pipeline variant of {@link KeyCommands#blessSet(String, BlessFlag)}.
+   * @param key the key to protect
+   * @param flag the flag to turn on
+   * @return 1 if the flag was turned on, 0 if it was already on
+   * @throws IllegalArgumentException if {@code flag} is {@code null}
+   * @since 8.1
+   */
+  Response<Long> blessSet(String key, BlessFlag flag);
+
+  /**
+   * Pipeline variant of {@link KeyCommands#blessClear(String, BlessFlag)}.
+   * @param key the key to unprotect
+   * @param flag the flag to turn off
+   * @return 1 if the flag was turned off, 0 if it was already off
+   * @throws IllegalArgumentException if {@code flag} is {@code null}
+   * @since 8.1
+   */
+  Response<Long> blessClear(String key, BlessFlag flag);
+
+  /**
+   * Pipeline variant of {@link KeyCommands#blessGet(String)}.
+   * @param key the key to query
+   * @return the active flags, empty if the key carries none
+   * @since 8.1
+   */
+  Response<List<BlessFlag>> blessGet(String key);
+
+  /**
+   * Pipeline variant of {@link KeyCommands#blessScan(String, BlessFlag)}.
+   * @param cursor the cursor, {@code "0"} to start an iteration
+   * @param flag the flag to filter on
+   * @return the next cursor and the keys of this batch
+   * @throws IllegalArgumentException if {@code flag} is {@code null}
+   * @since 8.1
+   */
+  Response<ScanResult<String>> blessScan(String cursor, BlessFlag flag);
+
+  /**
+   * Pipeline variant of {@link KeyCommands#blessScan(String, BlessFlag, int)}.
+   * @param cursor the cursor, {@code "0"} to start an iteration
+   * @param flag the flag to filter on
+   * @param count hint for how many entries to visit per call, must be positive
+   * @return the next cursor and the keys of this batch
+   * @throws IllegalArgumentException if {@code flag} is {@code null}
+   * @since 8.1
+   */
+  Response<ScanResult<String>> blessScan(String cursor, BlessFlag flag, int count);
 
   Response<String> randomKey();
 

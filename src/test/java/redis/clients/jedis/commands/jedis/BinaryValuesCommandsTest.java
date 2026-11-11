@@ -1,10 +1,9 @@
 package redis.clients.jedis.commands.jedis;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static redis.clients.jedis.Protocol.Command.BLPOP;
 import static redis.clients.jedis.Protocol.Command.GET;
 import static redis.clients.jedis.Protocol.Command.LRANGE;
@@ -15,15 +14,32 @@ import static redis.clients.jedis.util.AssertUtil.assertByteArrayListEquals;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
-import org.junit.Before;
-import org.junit.Test;
+import io.redis.test.annotations.EnabledOnCommand;
+import io.redis.test.annotations.ConditionalOnEnv;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import redis.clients.jedis.Protocol;
+import redis.clients.jedis.RedisProtocol;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.params.GetExParams;
-import redis.clients.jedis.util.SafeEncoder;
+import redis.clients.jedis.params.IncrexFloatParams;
+import redis.clients.jedis.params.IncrexParams;
+import redis.clients.jedis.params.MSetExParams;
 
+import redis.clients.jedis.util.SafeEncoder;
+import redis.clients.jedis.util.TestEnvUtil;
+
+@ParameterizedClass
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#jedisRespVersions")
 public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
   byte[] bfoo = { 0x01, 0x02, 0x03, 0x04 };
   byte[] bbar = { 0x05, 0x06, 0x07, 0x08 };
@@ -35,7 +51,11 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
   long expireMillis = expireSeconds * 1000;
   byte[] binaryValue;
 
-  @Before
+  public BinaryValuesCommandsTest(RedisProtocol protocol) {
+    super(protocol);
+  }
+
+  @BeforeEach
   public void startUp() {
     StringBuilder sb = new StringBuilder();
 
@@ -110,6 +130,7 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
   public void setAndKeepttl() {
     assertEquals("OK", jedis.set(bfoo, binaryValue, setParams().nx().ex(expireSeconds)));
     assertEquals("OK", jedis.set(bfoo, binaryValue, setParams().keepttl()));
+    assertEquals("OK", jedis.set(bfoo, binaryValue, setParams().keepTtl()));
     long ttl = jedis.ttl(bfoo);
     assertTrue(0 < ttl && ttl <= expireSeconds);
     jedis.set(bfoo, binaryValue);
@@ -120,7 +141,7 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
   @Test
   public void setAndPxat() {
     assertEquals("OK", jedis.set(bfoo, binaryValue,
-        setParams().nx().pxAt(System.currentTimeMillis() + expireMillis)));
+      setParams().nx().pxAt(System.currentTimeMillis() + expireMillis)));
     long ttl = jedis.ttl(bfoo);
     assertTrue(ttl > 0 && ttl <= expireSeconds);
   }
@@ -128,7 +149,7 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
   @Test
   public void setAndExat() {
     assertEquals("OK", jedis.set(bfoo, binaryValue,
-        setParams().nx().exAt(System.currentTimeMillis() / 1000 + expireSeconds)));
+      setParams().nx().exAt(System.currentTimeMillis() / 1000 + expireSeconds)));
     long ttl = jedis.ttl(bfoo);
     assertTrue(ttl > 0 && ttl <= expireSeconds);
   }
@@ -161,11 +182,13 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
     ttl = jedis.ttl(bfoo);
     assertTrue(ttl > 10 && ttl <= 20);
 
-    assertArrayEquals(bbar, jedis.getEx(bfoo, GetExParams.getExParams().exAt(System.currentTimeMillis() / 1000 + 30)));
+    assertArrayEquals(bbar,
+      jedis.getEx(bfoo, GetExParams.getExParams().exAt(System.currentTimeMillis() / 1000 + 30)));
     ttl = jedis.ttl(bfoo);
     assertTrue(ttl > 20 && ttl <= 30);
 
-    assertArrayEquals(bbar, jedis.getEx(bfoo, GetExParams.getExParams().pxAt(System.currentTimeMillis() + 40000l)));
+    assertArrayEquals(bbar,
+      jedis.getEx(bfoo, GetExParams.getExParams().pxAt(System.currentTimeMillis() + 40000l)));
     ttl = jedis.ttl(bfoo);
     assertTrue(ttl > 30 && ttl <= 40);
 
@@ -221,6 +244,7 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void msetnx() {
     assertEquals(1, jedis.msetnx(bfoo, binaryValue, bbar, bfoo));
     assertArrayEquals(binaryValue, jedis.get(bfoo));
@@ -237,10 +261,12 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
     assertEquals(2, jedis.incr(bfoo));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void incrWrongValue() {
-    jedis.set(bfoo, binaryValue);
-    jedis.incr(bfoo);
+    Assertions.assertThrows(JedisDataException.class, () -> {
+      jedis.set(bfoo, binaryValue);
+      jedis.incr(bfoo);
+    });
   }
 
   @Test
@@ -249,10 +275,12 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
     assertEquals(4, jedis.incrBy(bfoo, 2));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void incrByWrongValue() {
-    jedis.set(bfoo, binaryValue);
-    jedis.incrBy(bfoo, 2);
+    Assertions.assertThrows(JedisDataException.class, () -> {
+      jedis.set(bfoo, binaryValue);
+      jedis.incrBy(bfoo, 2);
+    });
   }
 
   @Test
@@ -267,10 +295,12 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
     assertEquals(-2, jedis.decr(bfoo));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void decrWrongValue() {
-    jedis.set(bfoo, binaryValue);
-    jedis.decr(bfoo);
+    Assertions.assertThrows(JedisDataException.class, () -> {
+      jedis.set(bfoo, binaryValue);
+      jedis.decr(bfoo);
+    });
   }
 
   @Test
@@ -279,10 +309,12 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
     assertEquals(-4, jedis.decrBy(bfoo, 2));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void decrByWrongValue() {
-    jedis.set(bfoo, binaryValue);
-    jedis.decrBy(bfoo, 2);
+    Assertions.assertThrows(JedisDataException.class, () -> {
+      jedis.set(bfoo, binaryValue);
+      jedis.decrBy(bfoo, 2);
+    });
   }
 
   @Test
@@ -300,6 +332,7 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void substr() {
     jedis.set(bfoo, binaryValue);
 
@@ -321,6 +354,19 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
   public void strlen() {
     jedis.set(bfoo, binaryValue);
     assertEquals(binaryValue.length, jedis.strlen(bfoo));
+  }
+
+  @Test
+  public void setGet() {
+    assertEquals("OK", jedis.set(bfoo, bbar));
+
+    // GET old value
+    assertArrayEquals(bbar, jedis.setGet(bfoo, binaryValue));
+
+    assertArrayEquals(binaryValue, jedis.get(bfoo));
+
+    // GET null value
+    assertNull(jedis.setGet(bbar, bfoo));
   }
 
   @Test
@@ -358,5 +404,98 @@ public class BinaryValuesCommandsTest extends JedisCommandsTestBase {
     assertArrayEquals(bbar, blpop.get(1));
 
     assertNull(jedis.sendBlockingCommand(BLPOP, bfoo, Protocol.toByteArray(1L)));
+  }
+
+  // MSETEX NX + expiration matrix (binary)
+  static Stream<Arguments> msetexNxArgsProvider() {
+    return Stream.of(msetexCase("EX", () -> new MSetExParams().nx().ex(5)),
+      msetexCase("PX", () -> new MSetExParams().nx().px(5000)),
+      msetexCase("EXAT",
+        () -> new MSetExParams().nx().exAt(System.currentTimeMillis() / 1000 + 60)),
+      msetexCase("PXAT", () -> new MSetExParams().nx().pxAt(System.currentTimeMillis() + 60_000)),
+      msetexCase("KEEPTTL", () -> new MSetExParams().nx().keepTtl()));
+  }
+
+  // Built per invocation so absolute EXAT/PXAT aren't stale by the time later cases run.
+  private static Arguments msetexCase(String label, Supplier<MSetExParams> params) {
+    return Arguments.of(label, params);
+  }
+
+  @ParameterizedTest(name = "MSETEX NX + {0} (binary)")
+  @MethodSource("msetexNxArgsProvider")
+  @EnabledOnCommand("MSETEX")
+  public void msetexNx_binary_parametrized(String optionLabel, Supplier<MSetExParams> params) {
+    byte[] k1 = "{t}msetex:jb:k1".getBytes();
+    byte[] k2 = "{t}msetex:jb:k2".getBytes();
+
+    boolean result = jedis.msetex(params.get(), k1, "v1".getBytes(), k2, "v2".getBytes());
+    assertTrue(result);
+
+    long ttl = jedis.ttl(k1);
+    if ("KEEPTTL".equals(optionLabel)) {
+      assertEquals(-1L, ttl);
+    } else {
+      assertTrue(ttl > 0L);
+    }
+  }
+
+  // ── INCREX (binary) ──────────────────────────────────────────
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxBasicBinary() {
+    List<Long> res = jedis.increx(bfoo);
+    assertEquals(Long.valueOf(1), res.get(0));
+    assertEquals(Long.valueOf(1), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxByIntWithBoundsAndExpiryBinary() {
+    jedis.set(bfoo, "10".getBytes());
+    IncrexParams params = new IncrexParams().lbound(0).ubound(20).ex(60);
+    List<Long> res = jedis.increx(bfoo, 2, params);
+    assertEquals(Long.valueOf(12), res.get(0));
+    assertEquals(Long.valueOf(2), res.get(1));
+    assertTrue(jedis.ttl(bfoo) > 0);
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxByFloatWithBoundsAndExpiryBinary() {
+    jedis.set(bfoo, "3.25".getBytes());
+    IncrexFloatParams params = new IncrexFloatParams().lbound(-1.5).ubound(9.5).ex(60);
+    List<Double> res = jedis.increx(bfoo, 1.25, params);
+    assertEquals(4.5, res.get(0), 0.0);
+    assertEquals(1.25, res.get(1), 0.0);
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxDefaultRejectSilentBinary() {
+    jedis.set(bfoo, "0".getBytes());
+    IncrexParams params = new IncrexParams().ubound(5);
+    List<Long> res = jedis.increx(bfoo, 10, params);
+    assertEquals(Long.valueOf(0), res.get(0));
+    assertEquals(Long.valueOf(0), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxSaturateUboundBinary() {
+    jedis.set(bfoo, "0".getBytes());
+    IncrexParams params = new IncrexParams().ubound(5).saturate();
+    List<Long> res = jedis.increx(bfoo, 10, params);
+    assertEquals(Long.valueOf(5), res.get(0));
+    assertEquals(Long.valueOf(5), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxFloatThenIntFailsBinary() {
+    jedis.set(bfoo, "1.5".getBytes());
+    IncrexParams params = new IncrexParams();
+    org.junit.jupiter.api.Assertions.assertThrows(JedisDataException.class,
+      () -> jedis.increx(bfoo, 1, params));
   }
 }

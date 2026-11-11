@@ -1,0 +1,185 @@
+package redis.clients.jedis.csc;
+
+import java.util.Objects;
+import java.util.concurrent.locks.ReentrantLock;
+
+import redis.clients.jedis.CommandObject;
+import redis.clients.jedis.Connection;
+import redis.clients.jedis.JedisClientConfig;
+import redis.clients.jedis.JedisSocketFactory;
+import redis.clients.jedis.Protocol;
+import redis.clients.jedis.PushConsumerChain;
+import redis.clients.jedis.RedisProtocol;
+import redis.clients.jedis.annots.VisibleForTesting;
+import redis.clients.jedis.exceptions.JedisException;
+import redis.clients.jedis.util.RedisInputStream;
+
+public class CacheConnection extends Connection {
+
+  public static class Builder extends Connection.Builder {
+    private Cache cache;
+
+    private Builder(Cache cache) {
+      if (cache == null) {
+        throw new IllegalArgumentException("Cache cannot be null!");
+      }
+      this.cache = cache;
+    }
+
+    public Cache getCache() {
+      return cache;
+    }
+
+    @Override
+    public Builder socketFactory(JedisSocketFactory socketFactory) {
+      super.socketFactory(socketFactory);
+      return this;
+    }
+
+    @Override
+    public Builder clientConfig(JedisClientConfig clientConfig) {
+      super.clientConfig(clientConfig);
+      return this;
+    }
+
+    @Override
+    protected Connection createConnection() {
+      return new CacheConnection(this);
+    }
+  }
+
+  public static Builder builder(Cache cache) {
+    return new Builder(cache);
+  }
+
+  @VisibleForTesting
+  public static Builder builder() {
+    throw new UnsupportedOperationException("Cache is required to build CacheConnection.");
+  }
+
+  private final Cache cache;
+  private ReentrantLock lock;
+  private static final String REDIS = "redis";
+  private static final String MIN_REDIS_VERSION = "7.4";
+
+  public CacheConnection(final JedisSocketFactory socketFactory, JedisClientConfig clientConfig, Cache cache) {
+    super(socketFactory, clientConfig);
+
+    this.cache = Objects.requireNonNull(cache);
+    initializeClientSideCache();
+  }
+
+  private CacheConnection(Builder builder) {
+    super(builder);
+    this.cache = builder.getCache();
+  }
+
+  @Override
+  protected void initializeFromClientConfig(JedisClientConfig config) {
+    lock = new ReentrantLock();
+    super.initializeFromClientConfig(config);
+    // this is required for the case ctor(builder).
+    // will also be called for the case ctor(socketFactory, clientConfig, cache) but will return
+    if (cache == null) return;
+    initializeClientSideCache();
+  }
+
+  @Override
+  protected Object protocolRead(RedisInputStream inputStream, PushConsumerChain consumer) {
+    lock.lock();
+    try {
+      return Protocol.read(inputStream, consumer);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  @Override
+  protected void protocolReadPushes(RedisInputStream inputStream, PushConsumerChain consumer) {
+    if (lock.tryLock()) {
+      try {
+        Protocol.readPushes(inputStream, consumer);
+      } finally {
+        lock.unlock();
+      }
+    }
+  }
+
+  @Override
+  public void disconnect() {
+    super.disconnect();
+    cache.flush();
+  }
+
+  @SuppressWarnings({ "rawtypes", "unchecked" })
+  @Override
+  public <T> T executeCommand(final CommandObject<T> commandObject) {
+    final CacheKey cacheKey = new CacheKey(commandObject);
+    if (!cache.isCacheable(cacheKey)) {
+      cache.getStats().nonCacheable();
+      return super.executeCommand(commandObject);
+    }
+
+    CacheEntry<T> cacheEntry = cache.get(cacheKey);
+    if (cacheEntry != null) { // (probable) CACHE HIT !!
+      cacheEntry = validateEntry(cacheEntry);
+      if (cacheEntry != null) {
+        // CACHE HIT confirmed !!!
+        cache.getStats().hit();
+        return cacheEntry.getValue();
+      }
+    }
+
+    // CACHE MISS !!
+    cache.getStats().miss();
+    Object reply = super.executeCommandRaw(commandObject);
+    cacheEntry = new CacheEntry<>(cacheKey, reply, commandObject.getBuilder(), this);
+    // Do not cache replies rejected by the builder, or give the builder the stored snapshot.
+    T value = cacheEntry.getValue();
+    cache.set(cacheKey, cacheEntry);
+    return value;
+  }
+
+  public Cache getCache() {
+    return cache;
+  }
+
+  private void initializeClientSideCache() {
+    if (getRedisProtocol() != RedisProtocol.RESP3) {
+      throw new JedisException("Client side caching is only supported with RESP3.");
+    }
+    Objects.requireNonNull(cache);
+    if (!cache.compatibilityMode()) {
+      RedisVersion current = new RedisVersion(version);
+      RedisVersion required = new RedisVersion(MIN_REDIS_VERSION);
+      if (!REDIS.equals(server) || current.compareTo(required) < 0) {
+        throw new JedisException(
+          String.format("Client side caching is only supported with 'Redis %s' or later.", MIN_REDIS_VERSION));
+      }
+    }
+    addPushConsumer(new PushInvalidateConsumer(cache));
+    sendCommand(Protocol.Command.CLIENT, "TRACKING", "ON");
+    String reply = getStatusCodeReply();
+    if (!"OK".equals(reply)) {
+      throw new JedisException("Could not enable client tracking. Reply: " + reply);
+    }
+  }
+
+  @SuppressWarnings("rawtypes")
+  private CacheEntry validateEntry(CacheEntry cacheEntry) {
+    CacheConnection cacheOwner = cacheEntry.getConnection();
+    if (cacheOwner == null || cacheOwner.isBroken() || !cacheOwner.isConnected()) {
+      cache.delete(cacheEntry.getCacheKey());
+      return null;
+    } else {
+      try {
+        cacheOwner.readPushesWithCheckingBroken();
+      } catch (JedisException e) {
+        cache.delete(cacheEntry.getCacheKey());
+        return null;
+      }
+
+      return cache.get(cacheEntry.getCacheKey());
+    }
+  }
+}

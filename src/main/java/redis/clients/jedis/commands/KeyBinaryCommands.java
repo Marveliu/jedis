@@ -3,11 +3,15 @@ package redis.clients.jedis.commands;
 import java.util.List;
 import java.util.Set;
 
+import redis.clients.jedis.args.ExpiryOption;
 import redis.clients.jedis.params.MigrateParams;
 import redis.clients.jedis.params.RestoreParams;
+import redis.clients.jedis.annots.Experimental;
+import redis.clients.jedis.util.CompareCondition;
 import redis.clients.jedis.params.ScanParams;
 import redis.clients.jedis.params.SortingParams;
 import redis.clients.jedis.resps.ScanResult;
+import redis.clients.jedis.args.BlessFlag;
 
 public interface KeyBinaryCommands {
 
@@ -27,11 +31,23 @@ public interface KeyBinaryCommands {
 
   long expire(byte[] key, long seconds);
 
+  long expire(byte[] key, long seconds, ExpiryOption expiryOption);
+
   long pexpire(byte[] key, long milliseconds);
+
+  long pexpire(byte[] key, long milliseconds, ExpiryOption expiryOption);
+
+  long expireTime(byte[] key);
+
+  long pexpireTime(byte[] key);
 
   long expireAt(byte[] key, long unixTime);
 
+  long expireAt(byte[] key, long unixTime, ExpiryOption expiryOption);
+
   long pexpireAt(byte[] key, long millisecondsTimestamp);
+
+  long pexpireAt(byte[] key, long millisecondsTimestamp, ExpiryOption expiryOption);
 
   long ttl(byte[] key);
 
@@ -43,9 +59,19 @@ public interface KeyBinaryCommands {
 
   List<byte[]> sort(byte[] key);
 
-  List<byte[]> sort(byte[] key, SortingParams sortingParameters);
+  List<byte[]> sort(byte[] key, SortingParams sortingParams);
 
   long del(byte[] key);
+
+  /**
+   * Experimental: Compare-and-delete guarded by value/digest condition.
+   */
+  @Experimental
+  long delex(byte[] key, CompareCondition condition);
+
+  /** Returns the 64-bit XXH3 digest hex (ASCII bytes) of the string value stored at key, or null if missing. */
+  @Experimental
+  byte[] digestKey(byte[] key);
 
   long del(byte[]... keys);
 
@@ -59,9 +85,11 @@ public interface KeyBinaryCommands {
 
   long renamenx(byte[] oldkey, byte[] newkey);
 
-  long sort(byte[] key, SortingParams sortingParameters, byte[] dstkey);
+  long sort(byte[] key, SortingParams sortingParams, byte[] dstkey);
 
   long sort(byte[] key, byte[] dstkey);
+
+  List<byte[]> sortReadonly(byte[] key, SortingParams sortingParams);
 
   Long memoryUsage(byte[] key);
 
@@ -86,6 +114,42 @@ public interface KeyBinaryCommands {
   ScanResult<byte[]> scan(byte[] cursor, ScanParams params);
 
   ScanResult<byte[]> scan(byte[] cursor, ScanParams params, byte[] type);
+
+  /**
+   * Binary variant of {@link KeyCommands#blessSet(String, BlessFlag)}.
+   * @see KeyCommands#blessSet(String, BlessFlag)
+   * @since 8.1
+   */
+  long blessSet(byte[] key, BlessFlag flag);
+
+  /**
+   * Binary variant of {@link KeyCommands#blessClear(String, BlessFlag)}.
+   * @see KeyCommands#blessClear(String, BlessFlag)
+   * @since 8.1
+   */
+  long blessClear(byte[] key, BlessFlag flag);
+
+  /**
+   * Binary variant of {@link KeyCommands#blessGet(String)}. Returns the raw wire tokens (for
+   * example {@code "NO-EVICT"}) rather than {@link BlessFlag} values.
+   * @see KeyCommands#blessGet(String)
+   * @since 8.1
+   */
+  List<byte[]> blessGet(byte[] key);
+
+  /**
+   * Binary variant of {@link KeyCommands#blessScan(String, BlessFlag)}.
+   * @see KeyCommands#blessScan(String, BlessFlag)
+   * @since 8.1
+   */
+  ScanResult<byte[]> blessScan(byte[] cursor, BlessFlag flag);
+
+  /**
+   * Binary variant of {@link KeyCommands#blessScan(String, BlessFlag, int)}.
+   * @see KeyCommands#blessScan(String, BlessFlag, int)
+   * @since 8.1
+   */
+  ScanResult<byte[]> blessScan(byte[] cursor, BlessFlag flag, int count);
 
   byte[] randomBinaryKey();
 

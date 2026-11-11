@@ -1,9 +1,11 @@
 package redis.clients.jedis;
 
+// TODO: 'resps' package
+// TODO: remove
 public class Module {
 
-  private String name;
-  private int version;
+  private final String name;
+  private final int version;
 
   public Module(String name, int version) {
     this.name = name;

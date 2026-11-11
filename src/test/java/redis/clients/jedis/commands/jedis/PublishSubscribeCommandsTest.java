@@ -1,38 +1,59 @@
 package redis.clients.jedis.commands.jedis;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasItems;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static redis.clients.jedis.Protocol.Command.CLIENT;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
-import org.junit.Test;
+import io.redis.test.annotations.ConditionalOnEnv;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import redis.clients.jedis.BinaryJedisPubSub;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
-import redis.clients.jedis.exceptions.JedisConnectionException;
+import redis.clients.jedis.RedisProtocol;
+import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.util.SafeEncoder;
+import redis.clients.jedis.util.TestEnvUtil;
 
+@ParameterizedClass
+@Timeout(value = 5, unit = TimeUnit.MINUTES)
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#jedisRespVersions")
 public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
+
+  public PublishSubscribeCommandsTest(RedisProtocol protocol) {
+    super(protocol);
+  }
+
   private void publishOne(final String channel, final String message) {
     Thread t = new Thread(new Runnable() {
       public void run() {
-        try {
-          Jedis j = createJedis();
+        try ( Jedis j = createJedis()) {
           j.publish(channel, message);
           j.disconnect();
         } catch (Exception ex) {
+          // ignore
         }
       }
     });
@@ -65,8 +86,6 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
 
   @Test
   public void pubSubChannels() {
-    final List<String> expectedActiveChannels = Arrays
-        .asList("testchan1", "testchan2", "testchan3");
     jedis.subscribe(new JedisPubSub() {
       private int count = 0;
 
@@ -75,12 +94,14 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
         count++;
         // All channels are subscribed
         if (count == 3) {
-          Jedis otherJedis = createJedis();
-          List<String> activeChannels = otherJedis.pubsubChannels();
+          List<String> activeChannels;
+          try (Jedis otherJedis = createJedis()) {
+            activeChannels = otherJedis.pubsubChannels();
+          }
           // Since we are utilizing sentinel for the tests, there is an additional
-          // '__sentinel__:hello' channel that has subscribers and will be returned from PUBSUB
-          // CHANNELS.
-          assertTrue(activeChannels.containsAll(expectedActiveChannels));
+          // '__sentinel__:hello' channel that has subscribers and will be returned
+          // from PUBSUB CHANNELS.
+          assertThat(activeChannels, hasItems("testchan1", "testchan2", "testchan3"));
           unsubscribe();
         }
       }
@@ -89,8 +110,6 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
 
   @Test
   public void pubSubChannelsWithPattern() {
-    final List<String> expectedActiveChannels = Arrays
-        .asList("testchan1", "testchan2", "testchan3");
     jedis.subscribe(new JedisPubSub() {
       private int count = 0;
 
@@ -99,9 +118,11 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
         count++;
         // All channels are subscribed
         if (count == 3) {
-          Jedis otherJedis = createJedis();
-          List<String> activeChannels = otherJedis.pubsubChannels("test*");
-          assertTrue(expectedActiveChannels.containsAll(activeChannels));
+          List<String> activeChannels;
+          try (Jedis otherJedis = createJedis()) {
+            activeChannels = otherJedis.pubsubChannels("test*");
+          }
+          assertThat(activeChannels, hasItems("testchan1", "testchan2", "testchan3"));
           unsubscribe();
         }
       }
@@ -183,9 +204,11 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
       public void onPSubscribe(String pattern, int subscribedChannels) {
         count++;
         if (count == 3) {
-          Jedis otherJedis = createJedis();
-          Long numPatterns = otherJedis.pubsubNumPat();
-          assertEquals(new Long(2l), numPatterns);
+          Long numPatterns;
+          try (Jedis otherJedis = createJedis()) {
+            numPatterns = otherJedis.pubsubNumPat();
+          }
+          assertEquals(Long.valueOf(2L), numPatterns);
           punsubscribe();
         }
       }
@@ -205,8 +228,10 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
       public void onSubscribe(String channel, int subscribedChannels) {
         count++;
         if (count == 2) {
-          Jedis otherJedis = createJedis();
-          Map<String, Long> numSub = otherJedis.pubsubNumSub("testchannel1", "testchannel2");
+          Map<String, Long> numSub;
+          try (Jedis otherJedis = createJedis()) {
+            numSub = otherJedis.pubsubNumSub("testchannel1", "testchannel2");
+          }
           assertEquals(expectedNumSub, numSub);
           unsubscribe();
         }
@@ -296,19 +321,19 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
   public void binarySubscribe() throws UnknownHostException, IOException, InterruptedException {
     jedis.subscribe(new BinaryJedisPubSub() {
       public void onMessage(byte[] channel, byte[] message) {
-        assertTrue(Arrays.equals(SafeEncoder.encode("foo"), channel));
-        assertTrue(Arrays.equals(SafeEncoder.encode("exit"), message));
+        assertArrayEquals(SafeEncoder.encode("foo"), channel);
+        assertArrayEquals(SafeEncoder.encode("exit"), message);
         unsubscribe();
       }
 
       public void onSubscribe(byte[] channel, int subscribedChannels) {
-        assertTrue(Arrays.equals(SafeEncoder.encode("foo"), channel));
+        assertArrayEquals(SafeEncoder.encode("foo"), channel);
         assertEquals(1, subscribedChannels);
         publishOne(SafeEncoder.encode(channel), "exit");
       }
 
       public void onUnsubscribe(byte[] channel, int subscribedChannels) {
-        assertTrue(Arrays.equals(SafeEncoder.encode("foo"), channel));
+        assertArrayEquals(SafeEncoder.encode("foo"), channel);
         assertEquals(0, subscribedChannels);
       }
     }, SafeEncoder.encode("foo"));
@@ -331,20 +356,20 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
   public void binaryPsubscribe() throws UnknownHostException, IOException, InterruptedException {
     jedis.psubscribe(new BinaryJedisPubSub() {
       public void onPSubscribe(byte[] pattern, int subscribedChannels) {
-        assertTrue(Arrays.equals(SafeEncoder.encode("foo.*"), pattern));
+        assertArrayEquals(SafeEncoder.encode("foo.*"), pattern);
         assertEquals(1, subscribedChannels);
         publishOne(SafeEncoder.encode(pattern).replace("*", "bar"), "exit");
       }
 
       public void onPUnsubscribe(byte[] pattern, int subscribedChannels) {
-        assertTrue(Arrays.equals(SafeEncoder.encode("foo.*"), pattern));
+        assertArrayEquals(SafeEncoder.encode("foo.*"), pattern);
         assertEquals(0, subscribedChannels);
       }
 
       public void onPMessage(byte[] pattern, byte[] channel, byte[] message) {
-        assertTrue(Arrays.equals(SafeEncoder.encode("foo.*"), pattern));
-        assertTrue(Arrays.equals(SafeEncoder.encode("foo.bar"), channel));
-        assertTrue(Arrays.equals(SafeEncoder.encode("exit"), message));
+        assertArrayEquals(SafeEncoder.encode("foo.*"), pattern);
+        assertArrayEquals(SafeEncoder.encode("foo.bar"), channel);
+        assertArrayEquals(SafeEncoder.encode("exit"), message);
         punsubscribe();
       }
     }, SafeEncoder.encode("foo.*"));
@@ -461,68 +486,73 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
     jedis.subscribe(pubsub, SafeEncoder.encode("foo"));
   }
 
-  @Test(expected = JedisConnectionException.class)
+  @Test
   public void unsubscribeWhenNotSusbscribed() throws InterruptedException {
     JedisPubSub pubsub = new JedisPubSub() {
     };
-    pubsub.unsubscribe();
+    assertThrows(JedisException.class, pubsub::unsubscribe);
   }
 
-  @Test(expected = JedisConnectionException.class)
+  @Test
+  // NOTE(imalinovskyi): Pushing 100Mb over high latency network can take a lot of time,
+  // so skipping for RE for now
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void handleClientOutputBufferLimitForSubscribeTooSlow() throws InterruptedException {
-    final Jedis j = createJedis();
-    final AtomicBoolean exit = new AtomicBoolean(false);
+    assertThrows(JedisException.class, () -> {
+      final Jedis j = createJedis();
+      final AtomicBoolean exit = new AtomicBoolean(false);
 
-    final Thread t = new Thread(new Runnable() {
-      public void run() {
-        try {
+      final Thread t = new Thread(new Runnable() {
+        public void run() {
+          try {
 
-          // we already set jedis1 config to
-          // client-output-buffer-limit pubsub 256k 128k 5
-          // it means if subscriber delayed to receive over 256k or
-          // 128k continuously 5 sec,
-          // redis disconnects subscriber
+            // we already set jedis1 config to
+            // client-output-buffer-limit pubsub 256k 128k 5
+            // it means if subscriber delayed to receive over 256k or
+            // 128k continuously 5 sec,
+            // redis disconnects subscriber
 
-          // we publish over 100M data for making situation for exceed
-          // client-output-buffer-limit
-          String veryLargeString = makeLargeString(10485760);
+            // we publish over 100M data for making situation for exceed
+            // client-output-buffer-limit
+            String veryLargeString = makeLargeString(10485760);
 
-          // 10M * 10 = 100M
-          for (int i = 0; i < 10 && !exit.get(); i++) {
-            j.publish("foo", veryLargeString);
+            // 10M * 10 = 100M
+            for (int i = 0; i < 10 && !exit.get(); i++) {
+              j.publish("foo", veryLargeString);
+            }
+
+            j.disconnect();
+          } catch (Exception ex) {
           }
+        }
+      });
+      t.start();
+      try {
+        jedis.subscribe(new JedisPubSub() {
+          public void onMessage(String channel, String message) {
+            try {
+              // wait 0.5 secs to slow down subscribe and
+              // client-output-buffer exceed
+              Thread.sleep(100);
+            } catch (Exception e) {
+              try {
+                t.join();
+              } catch (InterruptedException e1) {
+              }
 
-          j.disconnect();
-        } catch (Exception ex) {
+              fail(e.getMessage());
+            }
+          }
+        }, "foo");
+      } finally {
+        // exit the publisher thread. if exception is thrown, thread might
+        // still keep publishing things.
+        exit.set(true);
+        if (t.isAlive()) {
+          t.join();
         }
       }
     });
-    t.start();
-    try {
-      jedis.subscribe(new JedisPubSub() {
-        public void onMessage(String channel, String message) {
-          try {
-            // wait 0.5 secs to slow down subscribe and
-            // client-output-buffer exceed
-            Thread.sleep(100);
-          } catch (Exception e) {
-            try {
-              t.join();
-            } catch (InterruptedException e1) {
-            }
-
-            fail(e.getMessage());
-          }
-        }
-      }, "foo");
-    } finally {
-      // exit the publisher thread. if exception is thrown, thread might
-      // still keep publishing things.
-      exit.set(true);
-      if (t.isAlive()) {
-        t.join();
-      }
-    }
   }
 
   private String makeLargeString(int size) {
@@ -531,5 +561,79 @@ public class PublishSubscribeCommandsTest extends JedisCommandsTestBase {
       sb.append((char) ('a' + i % 26));
 
     return sb.toString();
+  }
+
+  @Test
+  @Timeout(5)
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void subscribeCacheInvalidateChannel() {
+    assumeTrue(protocol != RedisProtocol.RESP3);
+
+
+    final String cacheInvalidate = "__redis__:invalidate";
+    final AtomicBoolean onMessage = new AtomicBoolean(false);
+    final JedisPubSub pubsub = new JedisPubSub() {
+      @Override public void onMessage(String channel, String message) {
+        onMessage.set(true);
+        assertEquals(cacheInvalidate, channel);
+        if (message != null) {
+          assertEquals("foo", message);
+          consumeJedis(j -> j.flushAll());
+        } else {
+          unsubscribe(channel);
+        }
+      }
+
+      @Override public void onSubscribe(String channel, int subscribedChannels) {
+        assertEquals(cacheInvalidate, channel);
+        consumeJedis(j -> j.set("foo", "bar"));
+      }
+    };
+
+    try (Jedis subscriber = createJedis()) {
+      long clientId = subscriber.clientId();
+      subscriber.sendCommand(CLIENT, "TRACKING", "ON", "REDIRECT", Long.toString(clientId), "BCAST");
+      subscriber.subscribe(pubsub, cacheInvalidate);
+      assertTrue(onMessage.get(), "Subscriber didn't get any message.");
+    }
+  }
+
+  @Test
+  @Timeout(5)
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void subscribeCacheInvalidateChannelBinary() {
+    assumeTrue(protocol != RedisProtocol.RESP3);
+
+    final byte[] cacheInvalidate = "__redis__:invalidate".getBytes();
+    final AtomicBoolean onMessage = new AtomicBoolean(false);
+    final BinaryJedisPubSub pubsub = new BinaryJedisPubSub() {
+      @Override public void onMessage(byte[] channel, byte[] message) {
+        onMessage.set(true);
+        assertArrayEquals(cacheInvalidate, channel);
+        if (message != null) {
+          assertArrayEquals("foo".getBytes(), message);
+          consumeJedis(j -> j.flushAll());
+        } else {
+          unsubscribe(channel);
+        }
+      }
+
+      @Override public void onSubscribe(byte[] channel, int subscribedChannels) {
+        assertArrayEquals(cacheInvalidate, channel);
+        consumeJedis(j -> j.set("foo".getBytes(), "bar".getBytes()));
+      }
+    };
+
+    try (Jedis subscriber = createJedis()) {
+      long clientId = subscriber.clientId();
+      subscriber.sendCommand(CLIENT, "TRACKING", "ON", "REDIRECT", Long.toString(clientId), "BCAST");
+      subscriber.subscribe(pubsub, cacheInvalidate);
+      assertTrue(onMessage.get(), "Subscriber didn't get any message.");
+    }
+  }
+
+  private void consumeJedis(Consumer<Jedis> consumer) {
+    Thread t = new Thread(() -> consumer.accept(jedis));
+    t.start();
   }
 }

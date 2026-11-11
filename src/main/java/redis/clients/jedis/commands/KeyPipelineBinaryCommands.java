@@ -4,11 +4,14 @@ import java.util.List;
 import java.util.Set;
 
 import redis.clients.jedis.Response;
+import redis.clients.jedis.args.ExpiryOption;
 import redis.clients.jedis.params.MigrateParams;
 import redis.clients.jedis.params.RestoreParams;
 import redis.clients.jedis.params.ScanParams;
 import redis.clients.jedis.params.SortingParams;
 import redis.clients.jedis.resps.ScanResult;
+import redis.clients.jedis.util.CompareCondition;
+import redis.clients.jedis.args.BlessFlag;
 
 public interface KeyPipelineBinaryCommands {
 
@@ -28,11 +31,23 @@ public interface KeyPipelineBinaryCommands {
 
   Response<Long> expire(byte[] key, long seconds);
 
+  Response<Long> expire(byte[] key, long seconds, ExpiryOption expiryOption);
+
   Response<Long> pexpire(byte[] key, long milliseconds);
+
+  Response<Long> pexpire(byte[] key, long milliseconds, ExpiryOption expiryOption);
+
+  Response<Long> expireTime(byte[] key);
+
+  Response<Long> pexpireTime(byte[] key);
 
   Response<Long> expireAt(byte[] key, long unixTime);
 
+  Response<Long> expireAt(byte[] key, long unixTime, ExpiryOption expiryOption);
+
   Response<Long> pexpireAt(byte[] key, long millisecondsTimestamp);
+
+  Response<Long> pexpireAt(byte[] key, long millisecondsTimestamp, ExpiryOption expiryOption);
 
   Response<Long> ttl(byte[] key);
 
@@ -44,11 +59,17 @@ public interface KeyPipelineBinaryCommands {
 
   Response<List<byte[]>> sort(byte[] key);
 
-  Response<List<byte[]>> sort(byte[] key, SortingParams sortingParameters);
+  Response<List<byte[]>> sort(byte[] key, SortingParams sortingParams);
+
+  Response<List<byte[]>> sortReadonly(byte[] key, SortingParams sortingParams);
 
   Response<Long> del(byte[] key);
 
   Response<Long> del(byte[]... keys);
+
+  Response<Long> delex(byte[] key, CompareCondition condition);
+
+  Response<byte[]> digestKey(byte[] key);
 
   Response<Long> unlink(byte[] key);
 
@@ -60,7 +81,7 @@ public interface KeyPipelineBinaryCommands {
 
   Response<Long> renamenx(byte[] oldkey, byte[] newkey);
 
-  Response<Long> sort(byte[] key, SortingParams sortingParameters, byte[] dstkey);
+  Response<Long> sort(byte[] key, SortingParams sortingParams, byte[] dstkey);
 
   Response<Long> sort(byte[] key, byte[] dstkey);
 
@@ -87,6 +108,55 @@ public interface KeyPipelineBinaryCommands {
   Response<ScanResult<byte[]>> scan(byte[] cursor, ScanParams params);
 
   Response<ScanResult<byte[]>> scan(byte[] cursor, ScanParams params, byte[] type);
+
+  /**
+   * Pipeline variant of {@link KeyBinaryCommands#blessSet(byte[], BlessFlag)}.
+   * @param key the key to protect
+   * @param flag the flag to turn on
+   * @return 1 if the flag was turned on, 0 if it was already on
+   * @throws IllegalArgumentException if {@code flag} is {@code null}
+   * @since 8.1
+   */
+  Response<Long> blessSet(byte[] key, BlessFlag flag);
+
+  /**
+   * Pipeline variant of {@link KeyBinaryCommands#blessClear(byte[], BlessFlag)}.
+   * @param key the key to unprotect
+   * @param flag the flag to turn off
+   * @return 1 if the flag was turned off, 0 if it was already off
+   * @throws IllegalArgumentException if {@code flag} is {@code null}
+   * @since 8.1
+   */
+  Response<Long> blessClear(byte[] key, BlessFlag flag);
+
+  /**
+   * Pipeline variant of {@link KeyBinaryCommands#blessGet(byte[])}.
+   * @param key the key to query
+   * @return the active flags, empty if the key carries none
+   * @since 8.1
+   */
+  Response<List<byte[]>> blessGet(byte[] key);
+
+  /**
+   * Pipeline variant of {@link KeyBinaryCommands#blessScan(byte[], BlessFlag)}.
+   * @param cursor the cursor, {@code "0"} to start an iteration
+   * @param flag the flag to filter on
+   * @return the next cursor and the keys of this batch
+   * @throws IllegalArgumentException if {@code flag} is {@code null}
+   * @since 8.1
+   */
+  Response<ScanResult<byte[]>> blessScan(byte[] cursor, BlessFlag flag);
+
+  /**
+   * Pipeline variant of {@link KeyBinaryCommands#blessScan(byte[], BlessFlag, int)}.
+   * @param cursor the cursor, {@code "0"} to start an iteration
+   * @param flag the flag to filter on
+   * @param count hint for how many entries to visit per call, must be positive
+   * @return the next cursor and the keys of this batch
+   * @throws IllegalArgumentException if {@code flag} is {@code null}
+   * @since 8.1
+   */
+  Response<ScanResult<byte[]>> blessScan(byte[] cursor, BlessFlag flag, int count);
 
   Response<byte[]> randomBinaryKey();
 

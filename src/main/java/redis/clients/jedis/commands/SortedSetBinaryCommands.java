@@ -2,14 +2,12 @@ package redis.clients.jedis.commands;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
-import redis.clients.jedis.params.ScanParams;
-import redis.clients.jedis.params.ZAddParams;
-import redis.clients.jedis.params.ZIncrByParams;
-import redis.clients.jedis.params.ZParams;
+import redis.clients.jedis.args.SortedSetOption;
+import redis.clients.jedis.params.*;
 import redis.clients.jedis.resps.ScanResult;
 import redis.clients.jedis.resps.Tuple;
+import redis.clients.jedis.util.KeyValue;
 
 public interface SortedSetBinaryCommands {
 
@@ -33,13 +31,33 @@ public interface SortedSetBinaryCommands {
 
   Long zrevrank(byte[] key, byte[] member);
 
+  KeyValue<Long, Double> zrankWithScore(byte[] key, byte[] member);
+
+  KeyValue<Long, Double> zrevrankWithScore(byte[] key, byte[] member);
+
   List<byte[]> zrange(byte[] key, long start, long stop);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrevrange(byte[] key, long start, long stop);
 
   List<Tuple> zrangeWithScores(byte[] key, long start, long stop);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrevrangeWithScores(byte[] key, long start, long stop);
+
+  List<byte[]> zrange(byte[] key, ZRangeParams zRangeParams);
+
+  List<Tuple> zrangeWithScores(byte[] key, ZRangeParams zRangeParams);
+
+  long zrangestore(byte[] dest, byte[] src, ZRangeParams zRangeParams);
 
   byte[] zrandmember(byte[] key);
 
@@ -65,36 +83,116 @@ public interface SortedSetBinaryCommands {
 
   long zcount(byte[] key, byte[] min, byte[] max);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrangeByScore(byte[] key, double min, double max);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrangeByScore(byte[] key, byte[] min, byte[] max);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrevrangeByScore(byte[] key, double max, double min);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrangeByScore(byte[] key, double min, double max, int offset, int count);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrevrangeByScore(byte[] key, byte[] max, byte[] min);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrangeByScore(byte[] key, byte[] min, byte[] max, int offset, int count);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrevrangeByScore(byte[] key, double max, double min, int offset, int count);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrangeByScoreWithScores(byte[] key, double min, double max);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrevrangeByScoreWithScores(byte[] key, double max, double min);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrangeByScoreWithScores(byte[] key, double min, double max, int offset, int count);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrevrangeByScore(byte[] key, byte[] max, byte[] min, int offset, int count);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrangeByScoreWithScores(byte[] key, byte[] min, byte[] max);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrevrangeByScoreWithScores(byte[] key, byte[] max, byte[] min);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrangeByScoreWithScores(byte[] key, byte[] min, byte[] max, int offset, int count);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrevrangeByScoreWithScores(byte[] key, double max, double min, int offset, int count);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrangeWithScores(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByScoreParams(double, double)} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<Tuple> zrevrangeByScoreWithScores(byte[] key, byte[] max, byte[] min, int offset, int count);
 
   long zremrangeByRank(byte[] key, long start, long stop);
@@ -105,12 +203,32 @@ public interface SortedSetBinaryCommands {
 
   long zlexcount(byte[] key, byte[] min, byte[] max);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByLexParams(byte[], byte[])}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrangeByLex(byte[] key, byte[] min, byte[] max);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByLexParams(byte[], byte[])}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrangeByLex(byte[] key, byte[] min, byte[] max, int offset, int count);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByLexParams(byte[], byte[])} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrevrangeByLex(byte[] key, byte[] max, byte[] min);
 
+  /**
+   * @deprecated Use {@link SortedSetBinaryCommands#zrange(byte[], ZRangeParams)} with {@link ZRangeParams#zrangeByLexParams(byte[], byte[])} and {@link ZRangeParams#rev()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 6.2.0.
+   */
+  @Deprecated
   List<byte[]> zrevrangeByLex(byte[] key, byte[] max, byte[] min, int offset, int count);
 
   long zremrangeByLex(byte[] key, byte[] min, byte[] max);
@@ -121,30 +239,69 @@ public interface SortedSetBinaryCommands {
 
   ScanResult<Tuple> zscan(byte[] key, byte[] cursor, ScanParams params);
 
-  List<byte[]> bzpopmax(double timeout, byte[]... keys);
+  KeyValue<byte[], Tuple> bzpopmax(double timeout, byte[]... keys);
 
-  List<byte[]> bzpopmin(double timeout, byte[]... keys);
+  KeyValue<byte[], Tuple> bzpopmin(double timeout, byte[]... keys);
 
-  Set<byte[]> zdiff(byte[]... keys);
+  List<byte[]> zdiff(byte[]... keys);
 
-  Set<Tuple> zdiffWithScores(byte[]... keys);
+  List<Tuple> zdiffWithScores(byte[]... keys);
 
+  /**
+   * @deprecated Use {@link #zdiffstore(byte[], byte[][])}.
+   */
+  @Deprecated
   long zdiffStore(byte[] dstkey, byte[]... keys);
 
-  Set<byte[]> zinter(ZParams params, byte[]... keys);
+  long zdiffstore(byte[] dstkey, byte[]... keys);
 
-  Set<Tuple> zinterWithScores(ZParams params, byte[]... keys);
+  List<byte[]> zinter(ZParams params, byte[]... keys);
+
+  List<Tuple> zinterWithScores(ZParams params, byte[]... keys);
 
   long zinterstore(byte[] dstkey, byte[]... sets);
 
   long zinterstore(byte[] dstkey, ZParams params, byte[]... sets);
 
-  Set<byte[]> zunion(ZParams params, byte[]... keys);
+  /**
+   * Similar to {@link #zinter(ZParams, byte[][]) ZINTER}, but instead of returning the result set,
+   * it returns just the cardinality of the result.
+   * <p>
+   * Time complexity O(N*K) worst case with N being the smallest input sorted set, K
+   * being the number of input sorted sets
+   * @see #zinter(ZParams, byte[][])
+   * @param keys group of sets
+   * @return The number of elements in the resulting intersection
+   */
+  long zintercard(byte[]... keys);
 
-  Set<Tuple> zunionWithScores(ZParams params, byte[]... keys);
+  /**
+   * Similar to {@link #zinter(ZParams, byte[][]) ZINTER}, but instead of returning the result set,
+   * it returns just the cardinality of the result.
+   * <p>
+   * Time complexity O(N*K) worst case with N being the smallest input sorted set, K
+   * being the number of input sorted sets
+   * @see #zinter(ZParams, byte[][])
+   * @param limit If the intersection cardinality reaches limit partway through the computation,
+   *              the algorithm will exit and yield limit as the cardinality
+   * @param keys group of sets
+   * @return The number of elements in the resulting intersection
+   */
+  long zintercard(long limit, byte[]... keys);
+
+  List<byte[]> zunion(ZParams params, byte[]... keys);
+
+  List<Tuple> zunionWithScores(ZParams params, byte[]... keys);
 
   long zunionstore(byte[] dstkey, byte[]... sets);
 
   long zunionstore(byte[] dstkey, ZParams params, byte[]... sets);
 
+  KeyValue<byte[], List<Tuple>> zmpop(SortedSetOption option, byte[]... keys);
+
+  KeyValue<byte[], List<Tuple>> zmpop(SortedSetOption option, int count, byte[]... keys);
+
+  KeyValue<byte[], List<Tuple>> bzmpop(double timeout, SortedSetOption option, byte[]... keys);
+
+  KeyValue<byte[], List<Tuple>> bzmpop(double timeout, SortedSetOption option, int count, byte[]... keys);
 }

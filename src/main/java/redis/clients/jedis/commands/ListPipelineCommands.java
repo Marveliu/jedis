@@ -5,8 +5,9 @@ import java.util.List;
 import redis.clients.jedis.Response;
 import redis.clients.jedis.args.ListDirection;
 import redis.clients.jedis.args.ListPosition;
+import redis.clients.jedis.params.LMoveMParams;
 import redis.clients.jedis.params.LPosParams;
-import redis.clients.jedis.resps.KeyedListElement;
+import redis.clients.jedis.util.KeyValue;
 
 public interface ListPipelineCommands {
 
@@ -42,25 +43,25 @@ public interface ListPipelineCommands {
 
   Response<Long> linsert(String key, ListPosition where, String pivot, String value);
 
-  Response<Long> lpushx(String key, String... string);
+  Response<Long> lpushx(String key, String... strings);
 
-  Response<Long> rpushx(String key, String... string);
+  Response<Long> rpushx(String key, String... strings);
 
   Response<List<String>> blpop(int timeout, String key);
 
-  Response<KeyedListElement> blpop(double timeout, String key);
+  Response<KeyValue<String, String>> blpop(double timeout, String key);
 
   Response<List<String>> brpop(int timeout, String key);
 
-  Response<KeyedListElement> brpop(double timeout, String key);
+  Response<KeyValue<String, String>> brpop(double timeout, String key);
 
   Response<List<String>> blpop(int timeout, String... keys);
 
-  Response<KeyedListElement> blpop(double timeout, String... keys);
+  Response<KeyValue<String, String>> blpop(double timeout, String... keys);
 
   Response<List<String>> brpop(int timeout, String... keys);
 
-  Response<KeyedListElement> brpop(double timeout, String... keys);
+  Response<KeyValue<String, String>> brpop(double timeout, String... keys);
 
   Response<String> rpoplpush(String srckey, String dstkey);
 
@@ -70,4 +71,41 @@ public interface ListPipelineCommands {
 
   Response<String> blmove(String srcKey, String dstKey, ListDirection from, ListDirection to, double timeout);
 
+  /**
+   * Pipeline variant of {@link ListCommands#lmovem(String, String, ListDirection, ListDirection)}.
+   * @since 8.0
+   */
+  Response<List<String>> lmovem(String srcKey, String dstKey, ListDirection from, ListDirection to);
+
+  /**
+   * Pipeline variant of
+   * {@link ListCommands#lmovem(String, String, ListDirection, ListDirection, LMoveMParams)}.
+   * @since 8.0
+   */
+  Response<List<String>> lmovem(String srcKey, String dstKey, ListDirection from, ListDirection to,
+      LMoveMParams params);
+
+  /**
+   * Pipeline variant of
+   * {@link ListCommands#blmovem(String, String, ListDirection, ListDirection, double)}.
+   * @since 8.0
+   */
+  Response<List<String>> blmovem(String srcKey, String dstKey, ListDirection from, ListDirection to,
+      double timeout);
+
+  /**
+   * Pipeline variant of
+   * {@link ListCommands#blmovem(String, String, ListDirection, ListDirection, double, LMoveMParams)}.
+   * @since 8.0
+   */
+  Response<List<String>> blmovem(String srcKey, String dstKey, ListDirection from, ListDirection to,
+      double timeout, LMoveMParams params);
+
+  Response<KeyValue<String, List<String>>> lmpop(ListDirection direction, String... keys);
+
+  Response<KeyValue<String, List<String>>> lmpop(ListDirection direction, int count, String... keys);
+
+  Response<KeyValue<String, List<String>>> blmpop(double timeout, ListDirection direction, String... keys);
+
+  Response<KeyValue<String, List<String>>> blmpop(double timeout, ListDirection direction, int count, String... keys);
 }

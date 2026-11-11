@@ -1,45 +1,19 @@
 package redis.clients.jedis.params;
 
+import java.util.Objects;
+
 import redis.clients.jedis.CommandArguments;
-import redis.clients.jedis.Protocol;
 import redis.clients.jedis.Protocol.Keyword;
+import redis.clients.jedis.annots.Experimental;
+import redis.clients.jedis.util.CompareCondition;
 
-public class SetParams extends Params implements IParams {
+public class SetParams extends BaseSetExParams<SetParams> {
 
-  private static final String XX = "xx";
-  private static final String NX = "nx";
-  private static final String PX = "px";
-  private static final String EX = "ex";
-  private static final String EXAT = "exat";
-  private static final String PXAT = "pxat";
-  private static final String KEEPTTL = "keepttl";
-  private static final String GET = "get";
-
-  public SetParams() {
-  }
+  private Keyword existance;
+  private CompareCondition condition;
 
   public static SetParams setParams() {
     return new SetParams();
-  }
-
-  /**
-   * Set the specified expire time, in seconds.
-   * @param secondsToExpire
-   * @return SetParams
-   */
-  public SetParams ex(long secondsToExpire) {
-    addParam(EX, secondsToExpire);
-    return this;
-  }
-
-  /**
-   * Set the specified expire time, in milliseconds.
-   * @param millisecondsToExpire
-   * @return SetParams
-   */
-  public SetParams px(long millisecondsToExpire) {
-    addParam(PX, millisecondsToExpire);
-    return this;
   }
 
   /**
@@ -47,7 +21,7 @@ public class SetParams extends Params implements IParams {
    * @return SetParams
    */
   public SetParams nx() {
-    addParam(NX);
+    this.existance = Keyword.NX;
     return this;
   }
 
@@ -56,80 +30,107 @@ public class SetParams extends Params implements IParams {
    * @return SetParams
    */
   public SetParams xx() {
-    addParam(XX);
+    this.existance = Keyword.XX;
     return this;
+  }
+
+  /**
+   * Set the specified expire time, in seconds.
+   * @param remainingSeconds
+   * @return SetParams
+   */
+  @Override
+  public SetParams ex(long remainingSeconds) {
+    return super.ex(remainingSeconds);
+  }
+
+  /**
+   * Set the specified expire time, in milliseconds.
+   * @param remainingMilliseconds
+   * @return SetParams
+   */
+  @Override
+  public SetParams px(long remainingMilliseconds) {
+    return super.px(remainingMilliseconds);
   }
 
   /**
    * Set the specified Unix time at which the key will expire, in seconds.
-   * @param seconds
+   * @param timestampSeconds
    * @return SetParams
    */
-  public SetParams exAt(long seconds) {
-    addParam(EXAT, seconds);
-    return this;
+  @Override
+  public SetParams exAt(long timestampSeconds) {
+    return super.exAt(timestampSeconds);
   }
 
   /**
    * Set the specified Unix time at which the key will expire, in milliseconds.
-   * @param milliseconds
+   * @param timestampMilliseconds
    * @return SetParams
    */
-  public SetParams pxAt(long milliseconds) {
-    addParam(PXAT, milliseconds);
-    return this;
+  @Override
+  public SetParams pxAt(long timestampMilliseconds) {
+    return super.pxAt(timestampMilliseconds);
+  }
+
+  /**
+   * Retain the time to live associated with the key.
+   *
+   * @deprecated Since 6.1.0 use {@link #keepTtl()} instead.
+   * @return SetParams
+   */
+  @Override
+  public SetParams keepttl() {
+    return keepTtl();
   }
 
   /**
    * Retain the time to live associated with the key.
    * @return SetParams
    */
-  public SetParams keepttl() {
-    addParam(KEEPTTL);
-    return this;
+  @Override
+  public SetParams keepTtl() {
+    return super.keepTtl();
   }
 
   /**
-   * Return the old value stored at key, or nil when key did not exist.
-   * @return SetParams
+   * Set a compare condition for compare-and-set operations.
+   * @param condition the condition to apply
+   * @return {@link SetParams}
    */
-  public SetParams get() {
-    addParam(GET);
+  @Experimental
+  public SetParams condition(CompareCondition condition) {
+    this.condition = condition;
     return this;
   }
 
   @Override
   public void addParams(CommandArguments args) {
-    if (contains(NX)) {
-      args.add(Keyword.NX);
-    }
-    if (contains(XX)) {
-      args.add(Keyword.XX);
+    // Condition must be added before NX/XX per Redis command syntax
+    if (condition != null) {
+      condition.addTo(args);
     }
 
-    if (contains(EX)) {
-      args.add(Keyword.EX);
-      args.add(Protocol.toByteArray((long) getParam(EX)));
-    }
-    if (contains(PX)) {
-      args.add(Keyword.PX);
-      args.add(Protocol.toByteArray((long) getParam(PX)));
-    }
-    if (contains(EXAT)) {
-      args.add(Keyword.EXAT);
-      args.add(Protocol.toByteArray((long) getParam(EXAT)));
-    }
-    if (contains(PXAT)) {
-      args.add(Keyword.PXAT);
-      args.add(Protocol.toByteArray((long) getParam(PXAT)));
-    }
-    if (contains(KEEPTTL)) {
-      args.add(Keyword.KEEPTTL);
+    if (existance != null) {
+      args.add(existance);
     }
 
-    if (contains(GET)) {
-      args.add(Keyword.GET);
-    }
+    super.addParams(args);
   }
 
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    SetParams setParams = (SetParams) o;
+    return Objects.equals(existance, setParams.existance)
+        && Objects.equals(condition, setParams.condition)
+        && super.equals((BaseSetExParams) o);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(existance, condition, super.hashCode());
+  }
 }

@@ -1,0 +1,56 @@
+name: Documentation Tests
+
+on:
+  push:
+    branches:
+      - master
+      - 'emb-examples'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  doctests:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:latest
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.m2/repository
+            /var/cache/apt
+          key: jedis-${{hashFiles('**/pom.xml')}}
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+      - name: Maven offline
+        run: |
+          mvn -q dependency:go-offline
+      - name: Run doctests
+        run: |
+          mvn -Pdoctests clean compile test
+      - name: Collect Redis server logs
+        if: always()
+        run: |
+          mkdir -p redis-logs
+          docker logs ${{ job.services.redis.id }} > redis-logs/redis-server.log 2>&1
+      - name: Upload Redis logs and test reports
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: doctests-redis-logs-${{ github.run_attempt }}
+          path: |
+            redis-logs/
+            target/surefire-reports/
+          if-no-files-found: warn
+          retention-days: 14

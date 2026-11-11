@@ -1,0 +1,270 @@
+package redis.clients.jedis.authentication;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.awaitility.Awaitility.await;
+import static org.awaitility.Durations.FIVE_SECONDS;
+import static org.awaitility.Durations.ONE_HUNDRED_MILLISECONDS;
+import static org.awaitility.Durations.ONE_SECOND;
+import static org.hamcrest.Matchers.greaterThan;
+
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import redis.clients.authentication.core.IdentityProvider;
+import redis.clients.authentication.core.IdentityProviderConfig;
+import redis.clients.authentication.core.SimpleToken;
+import redis.clients.authentication.core.TokenAuthConfig;
+import redis.clients.jedis.Connection;
+/*  */
+import redis.clients.jedis.DefaultJedisClientConfig;
+import redis.clients.jedis.EndpointConfig;
+import redis.clients.jedis.Endpoints;
+import redis.clients.jedis.JedisClientConfig;
+import redis.clients.jedis.JedisPubSub;
+import redis.clients.jedis.RedisClient;
+import redis.clients.jedis.RedisProtocol;
+import redis.clients.jedis.exceptions.JedisException;
+
+public class TokenBasedAuthenticationIntegrationTests {
+  private static final Logger log = LoggerFactory
+      .getLogger(TokenBasedAuthenticationIntegrationTests.class);
+
+  private static EndpointConfig endpointConfig;
+
+  @BeforeAll
+  public static void before() {
+    try {
+      endpointConfig = Endpoints.getRedisEndpoint("standalone0");
+    } catch (IllegalArgumentException e) {
+      log.warn("Skipping test because no Redis endpoint is configured");
+      assumeTrue(false);
+    }
+  }
+
+  @Test
+  public void testClientForInitialAuth() {
+    String user = "default";
+    String password = endpointConfig.getPassword();
+
+    IdentityProvider idProvider = mock(IdentityProvider.class);
+    when(idProvider.requestToken()).thenReturn(new SimpleToken(user, password,
+        System.currentTimeMillis() + 100000, System.currentTimeMillis(), null));
+
+    IdentityProviderConfig idProviderConfig = mock(IdentityProviderConfig.class);
+    when(idProviderConfig.getProvider()).thenReturn(idProvider);
+
+    TokenAuthConfig tokenAuthConfig = TokenAuthConfig.builder()
+        .identityProviderConfig(idProviderConfig).expirationRefreshRatio(0.8F)
+        .lowerRefreshBoundMillis(10000).tokenRequestExecTimeoutInMs(1000).build();
+
+    JedisClientConfig clientConfig = DefaultJedisClientConfig.builder()
+        .authXManager(new AuthXManager(tokenAuthConfig)).build();
+
+    try (RedisClient jedis = RedisClient.builder()
+        .hostAndPort(endpointConfig.getHostAndPort())
+        .clientConfig(clientConfig)
+        .build()) {
+      jedis.get("key1");
+    }
+  }
+
+  @Test
+  public void testClientReauth() {
+    String user = "default";
+    String password = endpointConfig.getPassword();
+
+    IdentityProvider idProvider = mock(IdentityProvider.class);
+    when(idProvider.requestToken()).thenAnswer(invocation -> new SimpleToken(user, password,
+        System.currentTimeMillis() + 5000, System.currentTimeMillis(), null));
+
+    IdentityProviderConfig idProviderConfig = mock(IdentityProviderConfig.class);
+    when(idProviderConfig.getProvider()).thenReturn(idProvider);
+
+    TokenAuthConfig tokenAuthConfig = TokenAuthConfig.builder()
+        .identityProviderConfig(idProviderConfig).expirationRefreshRatio(0.8F)
+        .lowerRefreshBoundMillis(4800).tokenRequestExecTimeoutInMs(1000).build();
+
+    AuthXManager authXManager = new AuthXManager(tokenAuthConfig);
+    authXManager = spy(authXManager);
+    List<Connection> connections = new CopyOnWriteArrayList<>();
+    doAnswer(invocation -> {
+      Connection connection = spy((Connection) invocation.getArgument(0));
+      invocation.getArguments()[0] = connection;
+      connections.add(connection);
+      Object result = invocation.callRealMethod();
+      return result;
+    }).when(authXManager).addConnection(any(Connection.class));
+
+    JedisClientConfig clientConfig = DefaultJedisClientConfig.builder().authXManager(authXManager)
+        .build();
+
+    try (RedisClient jedis = RedisClient.builder()
+        .hostAndPort(endpointConfig.getHostAndPort())
+        .clientConfig(clientConfig)
+        .build()) {
+      AtomicBoolean stop = new AtomicBoolean(false);
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      executor.submit(() -> {
+        while (!stop.get()) {
+          jedis.get("key1");
+        }
+      });
+
+      for (Connection connection : connections) {
+        await().pollDelay(ONE_HUNDRED_MILLISECONDS).atMost(ONE_SECOND).untilAsserted(() -> {
+          verify(connection, atLeast(3)).reAuthenticate();
+        });
+      }
+      stop.set(true);
+      executor.shutdown();
+    }
+  }
+
+  @Test
+  public void testPubSubForInitialAuth() throws InterruptedException {
+    String user = "default";
+    String password = endpointConfig.getPassword();
+
+    IdentityProvider idProvider = mock(IdentityProvider.class);
+    when(idProvider.requestToken()).thenReturn(new SimpleToken(user, password,
+        System.currentTimeMillis() + 100000, System.currentTimeMillis(), null));
+
+    IdentityProviderConfig idProviderConfig = mock(IdentityProviderConfig.class);
+    when(idProviderConfig.getProvider()).thenReturn(idProvider);
+
+    TokenAuthConfig tokenAuthConfig = TokenAuthConfig.builder()
+        .identityProviderConfig(idProviderConfig).expirationRefreshRatio(0.8F)
+        .lowerRefreshBoundMillis(10000).tokenRequestExecTimeoutInMs(1000).build();
+
+    JedisClientConfig clientConfig = DefaultJedisClientConfig.builder()
+        .authXManager(new AuthXManager(tokenAuthConfig)).protocol(RedisProtocol.RESP3).build();
+
+    JedisPubSub pubSub = new JedisPubSub() {
+      public void onSubscribe(String channel, int subscribedChannels) {
+        this.unsubscribe();
+      }
+    };
+
+    try (RedisClient jedis = RedisClient.builder()
+        .hostAndPort(endpointConfig.getHostAndPort())
+        .clientConfig(clientConfig)
+        .build()) {
+      jedis.subscribe(pubSub, "channel1");
+    }
+  }
+
+  @Test
+  public void testJedisPubSubReauth() throws Exception {
+    String user = "default";
+    String password = endpointConfig.getPassword();
+
+    IdentityProvider idProvider = mock(IdentityProvider.class);
+    when(idProvider.requestToken()).thenAnswer(invocation -> new SimpleToken(user, password,
+        System.currentTimeMillis() + 5000, System.currentTimeMillis(), null));
+
+    IdentityProviderConfig idProviderConfig = mock(IdentityProviderConfig.class);
+    when(idProviderConfig.getProvider()).thenReturn(idProvider);
+
+    TokenAuthConfig tokenAuthConfig = TokenAuthConfig.builder()
+        .identityProviderConfig(idProviderConfig).expirationRefreshRatio(0.8F)
+        .lowerRefreshBoundMillis(4800).tokenRequestExecTimeoutInMs(1000).build();
+
+    AuthXManager authXManager = spy(new AuthXManager(tokenAuthConfig));
+    AuthXEventListener listener = mock(AuthXEventListener.class);
+    authXManager.setListener(listener);
+    List<Connection> connections = new CopyOnWriteArrayList<>();
+    doAnswer(invocation -> {
+      connections.add(invocation.getArgument(0));
+      return invocation.callRealMethod();
+    }).when(authXManager).addConnection(any(Connection.class));
+
+    JedisClientConfig clientConfig = DefaultJedisClientConfig.builder().authXManager(authXManager)
+        .protocol(RedisProtocol.RESP3).build();
+
+    JedisPubSub pubSub = new JedisPubSub() {
+    };
+    try (RedisClient jedis = RedisClient.builder()
+        .hostAndPort(endpointConfig.getHostAndPort())
+        .clientConfig(clientConfig)
+        .build()) {
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      try {
+        Future<?> subscription = executor.submit(() -> jedis.subscribe(pubSub, "channel1"));
+
+        await().pollDelay(ONE_HUNDRED_MILLISECONDS).atMost(ONE_SECOND)
+            .until(pubSub::getSubscribedChannels, greaterThan(0));
+
+        assertEquals(1, connections.size());
+        await().pollDelay(ONE_HUNDRED_MILLISECONDS).atMost(FIVE_SECONDS)
+            .untilAsserted(() -> verify(authXManager, atLeast(5)).authenticateConnections(any()));
+        assertFalse(subscription.isDone());
+        assertFalse(connections.get(0).isBroken());
+        try {
+          pubSub.unsubscribe();
+        } finally {
+          subscription.get(5, TimeUnit.SECONDS);
+        }
+        assertFalse(connections.get(0).isBroken());
+        verify(listener, never()).onConnectionAuthenticationError(any());
+      } finally {
+        executor.shutdownNow();
+      }
+    } finally {
+      authXManager.stop();
+    }
+  }
+
+  @Test
+  public void testJedisPubSubWithResp2() {
+    String user = "default";
+    String password = endpointConfig.getPassword();
+
+    IdentityProvider idProvider = mock(IdentityProvider.class);
+    when(idProvider.requestToken()).thenReturn(new SimpleToken(user, password,
+        System.currentTimeMillis() + 100000, System.currentTimeMillis(), null));
+
+    IdentityProviderConfig idProviderConfig = mock(IdentityProviderConfig.class);
+    when(idProviderConfig.getProvider()).thenReturn(idProvider);
+
+    TokenAuthConfig tokenAuthConfig = TokenAuthConfig.builder()
+        .identityProviderConfig(idProviderConfig).expirationRefreshRatio(0.8F)
+        .lowerRefreshBoundMillis(10000).tokenRequestExecTimeoutInMs(1000).build();
+
+    // Explicitly use RESP2 protocol to test the RESP2-specific error for token-based auth with pub/sub
+    JedisClientConfig clientConfig = DefaultJedisClientConfig.builder()
+        .authXManager(new AuthXManager(tokenAuthConfig)).protocol(RedisProtocol.RESP2).build();
+
+    try (RedisClient jedis = RedisClient.builder()
+        .hostAndPort(endpointConfig.getHostAndPort())
+        .clientConfig(clientConfig)
+        .build()) {
+      JedisPubSub pubSub = new JedisPubSub() {};
+      JedisException e = assertThrows(JedisException.class,
+          () -> jedis.subscribe(pubSub, "channel1"));
+      assertEquals(
+          "Blocking pub/sub operations are not supported on token-based authentication enabled connections with RESP2 protocol!",
+          e.getMessage());
+    }
+  }
+}

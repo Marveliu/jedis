@@ -1,11 +1,12 @@
 package redis.clients.jedis.commands.jedis;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
 
+import static io.redis.test.utils.RedisVersion.V8_10_0_RC2_STRING;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static redis.clients.jedis.params.ScanParams.SCAN_POINTER_START;
 import static redis.clients.jedis.params.ScanParams.SCAN_POINTER_START_BINARY;
 import static redis.clients.jedis.util.AssertUtil.assertByteArrayCollectionContainsAll;
@@ -19,11 +20,27 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import org.junit.Test;
+import io.redis.test.annotations.EnabledOnCommand;
+import io.redis.test.annotations.SinceRedisVersion;
+import io.redis.test.annotations.ConditionalOnEnv;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
 
+
+import redis.clients.jedis.RedisProtocol;
+import redis.clients.jedis.args.ExpiryOption;
+import redis.clients.jedis.params.SAddExParams;
+import redis.clients.jedis.params.SDiffCardParams;
+import redis.clients.jedis.params.SUnionCardParams;
 import redis.clients.jedis.params.ScanParams;
 import redis.clients.jedis.resps.ScanResult;
+import redis.clients.jedis.util.TestEnvUtil;
 
+@ParameterizedClass
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#jedisRespVersions")
+@Tag("integration")
 public class SetCommandsTest extends JedisCommandsTestBase {
   final byte[] bfoo = { 0x01, 0x02, 0x03, 0x04 };
   final byte[] bbar = { 0x05, 0x06, 0x07, 0x08 };
@@ -38,6 +55,10 @@ public class SetCommandsTest extends JedisCommandsTestBase {
   final byte[] bbar2 = { 0x05, 0x06, 0x07, 0x08, 0x0B };
   final byte[] bbar3 = { 0x05, 0x06, 0x07, 0x08, 0x0C };
   final byte[] bbarstar = { 0x05, 0x06, 0x07, 0x08, '*' };
+
+  public SetCommandsTest(RedisProtocol protocol) {
+    super(protocol);
+  }
 
   @Test
   public void sadd() {
@@ -191,6 +212,7 @@ public class SetCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void smove() {
     jedis.sadd("foo", "a");
     jedis.sadd("foo", "b");
@@ -295,6 +317,7 @@ public class SetCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void sinter() {
     jedis.sadd("foo", "a");
     jedis.sadd("foo", "b");
@@ -323,6 +346,7 @@ public class SetCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void sinterstore() {
     jedis.sadd("foo", "a");
     jedis.sadd("foo", "b");
@@ -356,6 +380,78 @@ public class SetCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @SinceRedisVersion("7.0.0")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void sintercard() {
+    jedis.sadd("foo", "a");
+    jedis.sadd("foo", "b");
+
+    jedis.sadd("bar", "a");
+    jedis.sadd("bar", "b");
+    jedis.sadd("bar", "c");
+
+    long card = jedis.sintercard("foo", "bar");
+    assertEquals(2, card);
+    long limitedCard = jedis.sintercard(1, "foo", "bar");
+    assertEquals(1, limitedCard);
+
+    // Binary
+    jedis.sadd(bfoo, ba);
+    jedis.sadd(bfoo, bb);
+
+    jedis.sadd(bbar, ba);
+    jedis.sadd(bbar, bb);
+    jedis.sadd(bbar, bc);
+
+    long bcard = jedis.sintercard(bfoo, bbar);
+    assertEquals(2, bcard);
+    long blimitedCard = jedis.sintercard(1, bfoo, bbar);
+    assertEquals(1, blimitedCard);
+  }
+
+  @Test
+  @SinceRedisVersion(V8_10_0_RC2_STRING)
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void sunioncard() {
+    jedis.sadd("foo", "a", "b", "c");
+    jedis.sadd("bar", "c", "d");
+
+    assertEquals(4, jedis.sunioncard("foo", "bar"));
+    assertEquals(4, jedis.sunioncard(Arrays.asList("foo", "bar")));
+    assertEquals(3, jedis.sunioncard("foo", "bar", new SUnionCardParams().approx().limit(3)));
+
+    // Binary
+    jedis.sadd(bfoo, ba, bb, bc);
+    jedis.sadd(bbar, bc, bd);
+
+    assertEquals(4, jedis.sunioncard(bfoo, bbar));
+    assertEquals(3, jedis.sunioncard(bfoo, bbar, new SUnionCardParams().limit(3)));
+    assertEquals(4, jedis.sunioncard(new byte[][] { bfoo, bbar }, new SUnionCardParams().approx()));
+  }
+
+  @Test
+  @SinceRedisVersion(V8_10_0_RC2_STRING)
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void sdiffcard() {
+    jedis.sadd("foo", "x", "a", "b", "c");
+    jedis.sadd("bar", "c");
+
+    assertEquals(3, jedis.sdiffcard("foo", "bar"));
+    assertEquals(3, jedis.sdiffcard(Arrays.asList("foo", "bar")));
+    assertEquals(1, jedis.sdiffcard("foo", "bar", new SDiffCardParams().limit(1)));
+    assertEquals(0, jedis.sdiffcard("nosuchset", "foo"));
+
+    // Binary
+    jedis.sadd(bfoo, bx, ba, bb, bc);
+    jedis.sadd(bbar, bc);
+
+    assertEquals(3, jedis.sdiffcard(bfoo, bbar));
+    assertEquals(1, jedis.sdiffcard(bfoo, bbar, new SDiffCardParams().limit(1)));
+    assertEquals(3, jedis.sdiffcard(new byte[][] { bfoo, bbar }, new SDiffCardParams().limit(0)));
+  }
+
+  @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void sunion() {
     jedis.sadd("foo", "a");
     jedis.sadd("foo", "b");
@@ -389,6 +485,7 @@ public class SetCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void sunionstore() {
     jedis.sadd("foo", "a");
     jedis.sadd("foo", "b");
@@ -426,6 +523,7 @@ public class SetCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void sdiff() {
     jedis.sadd("foo", "x");
     jedis.sadd("foo", "a");
@@ -465,6 +563,7 @@ public class SetCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void sdiffstore() {
     jedis.sadd("foo", "x");
     jedis.sadd("foo", "a");
@@ -603,5 +702,67 @@ public class SetCommandsTest extends JedisCommandsTestBase {
     ScanResult<byte[]> bResult = jedis.sscan(bfoo, SCAN_POINTER_START_BINARY, params);
 
     assertFalse(bResult.getResult().isEmpty());
+  }
+
+  @Test
+  @EnabledOnCommand("SADDEX")
+  public void sexpireAndSttl() {
+    long seconds = 20;
+    jedis.sadd("foo", "a", "b");
+    assertEquals(Arrays.asList(1L, -2L), jedis.sexpire("foo", seconds, "a", "nosuch"));
+    assertEquals(Arrays.asList(0L, 1L), jedis.sexpire("foo", seconds, ExpiryOption.NX, "a", "b"));
+
+    List<Long> ttl = jedis.sttl("foo", "a", "b", "nosuch");
+    assertTrue(ttl.get(0) >= seconds - 1 && ttl.get(0) <= seconds, ttl.toString());
+    assertTrue(ttl.get(1) >= seconds - 1 && ttl.get(1) <= seconds, ttl.toString());
+    assertEquals(Long.valueOf(-2), ttl.get(2));
+
+    assertEquals(Arrays.asList(1L, -2L), jedis.spersist("foo", "a", "nosuch"));
+    assertEquals(-1, jedis.sttl("foo", "a"));
+  }
+
+  @Test
+  @EnabledOnCommand("SADDEX")
+  public void sexpireAndSttlBinary() {
+    long seconds = 20;
+    jedis.sadd(bfoo, ba, bb);
+    assertEquals(Arrays.asList(1L, -2L), jedis.sexpire(bfoo, seconds, ba, bx));
+    assertEquals(Arrays.asList(0L, 1L), jedis.sexpire(bfoo, seconds, ExpiryOption.NX, ba, bb));
+
+    List<Long> ttl = jedis.sttl(bfoo, ba, bb, bx);
+    assertTrue(ttl.get(0) >= seconds - 1 && ttl.get(0) <= seconds, ttl.toString());
+    assertTrue(ttl.get(1) >= seconds - 1 && ttl.get(1) <= seconds, ttl.toString());
+    assertEquals(Long.valueOf(-2), ttl.get(2));
+
+    assertEquals(Arrays.asList(1L, -2L), jedis.spersist(bfoo, ba, bx));
+    assertEquals(-1, jedis.sttl(bfoo, ba));
+  }
+
+  @Test
+  @EnabledOnCommand("SADDEX")
+  public void saddex() {
+    long millis = 1_000_000;
+    assertEquals(1, jedis.saddex("foo", SAddExParams.sAddExParams().px(millis), "a", "b"));
+    List<Long> pttl = jedis.spttl("foo", "a", "b");
+    assertTrue(pttl.get(0) > millis - 1000 && pttl.get(0) <= millis, pttl.toString());
+
+    assertEquals(0, jedis.saddex("foo", SAddExParams.sAddExParams().mnx(), "a", "c"));
+    assertFalse(jedis.sismember("foo", "c"));
+    assertEquals(1, jedis.saddex("foo", SAddExParams.sAddExParams().mxx(), "a", "b"));
+    assertEquals(Arrays.asList(-1L, -1L), jedis.spttl("foo", "a", "b"));
+  }
+
+  @Test
+  @EnabledOnCommand("SADDEX")
+  public void saddexBinary() {
+    long millis = 1_000_000;
+    assertEquals(1, jedis.saddex(bfoo, SAddExParams.sAddExParams().px(millis), ba, bb));
+    List<Long> pttl = jedis.spttl(bfoo, ba, bb);
+    assertTrue(pttl.get(0) > millis - 1000 && pttl.get(0) <= millis, pttl.toString());
+
+    assertEquals(0, jedis.saddex(bfoo, SAddExParams.sAddExParams().mnx(), ba, bc));
+    assertFalse(jedis.sismember(bfoo, bc));
+    assertEquals(1, jedis.saddex(bfoo, SAddExParams.sAddExParams().mxx(), ba, bb));
+    assertEquals(Arrays.asList(-1L, -1L), jedis.spttl(bfoo, ba, bb));
   }
 }

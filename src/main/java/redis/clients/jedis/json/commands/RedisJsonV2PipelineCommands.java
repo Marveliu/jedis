@@ -1,0 +1,111 @@
+package redis.clients.jedis.json.commands;
+
+import java.util.List;
+import org.json.JSONArray;
+import redis.clients.jedis.Response;
+import redis.clients.jedis.json.JsonSetParams;
+import redis.clients.jedis.json.Path2;
+
+public interface RedisJsonV2PipelineCommands {
+
+  default Response<String> jsonSet(String key, Object object) {
+    return jsonSet(key, Path2.ROOT_PATH, object);
+  }
+
+  default Response<String> jsonSetWithEscape(String key, Object object) {
+    return jsonSetWithEscape(key, Path2.ROOT_PATH, object);
+  }
+
+  default Response<String> jsonSet(String key, Object object, JsonSetParams params) {
+    return jsonSet(key, Path2.ROOT_PATH, object, params);
+  }
+
+  default Response<String> jsonSetWithEscape(String key, Object object, JsonSetParams params) {
+    return jsonSetWithEscape(key, Path2.ROOT_PATH, object, params);
+  }
+
+  Response<String> jsonSet(String key, Path2 path, Object object);
+
+  Response<String> jsonSetWithEscape(String key, Path2 path, Object object);
+
+  Response<String> jsonSet(String key, Path2 path, Object object, JsonSetParams params);
+
+  Response<String> jsonSetWithEscape(String key, Path2 path, Object object, JsonSetParams params);
+
+  Response<String> jsonMerge(String key, Path2 path, Object object);
+
+  Response<Object> jsonGet(String key); // both ver
+
+  Response<Object> jsonGet(String key, Path2... paths);
+
+  default Response<List<JSONArray>> jsonMGet(String... keys) {
+    return jsonMGet(Path2.ROOT_PATH, keys);
+  }
+
+  Response<List<JSONArray>> jsonMGet(Path2 path, String... keys);
+
+  Response<Long> jsonDel(String key); // both ver
+
+  Response<Long> jsonDel(String key, Path2 path);
+
+  Response<Long> jsonClear(String key); // no test
+
+  Response<Long> jsonClear(String key, Path2 path);
+
+  Response<List<Boolean>> jsonToggle(String key, Path2 path);
+
+  Response<List<Class<?>>> jsonType(String key, Path2 path);
+
+  Response<List<Long>> jsonStrAppend(String key, Path2 path, Object string);
+
+  Response<List<Long>> jsonStrLen(String key, Path2 path);
+
+  Response<Object> jsonNumIncrBy(String key, Path2 path, Number value);
+
+  /**
+   * <b><a href="https://redis.io/commands/json.numincrby">JSON.NUMINCRBY Command</a></b> Increments
+   * the number value stored at path by value, returning each incremented value as a {@literal Long}
+   * or {@literal Double}.
+   * @param key the key holding the JSON document
+   * @param path the JSONPath to the array(s)
+   * @param value the number value to increment
+   * @return the incremented value as a {@link Long} or {@link Double}, one per matched path, or
+   *         {@code null} for a matched value that is not a number. Missing paths return an empty
+   *         list
+   * @since 8.1
+   */
+  Response<List<Number>> jsonNumIncrByAsNumbers(String key, Path2 path, Number value);
+
+  Response<List<Long>> jsonArrAppend(String key, Path2 path, Object... objects);
+
+  Response<List<Long>> jsonArrAppendWithEscape(String key, Path2 path, Object... objects);
+
+  Response<List<Long>> jsonArrIndex(String key, Path2 path, Object scalar);
+
+  Response<List<Long>> jsonArrIndexWithEscape(String key, Path2 path, Object scalar);
+
+  Response<List<Long>> jsonArrInsert(String key, Path2 path, int index, Object... objects);
+
+  Response<List<Long>> jsonArrInsertWithEscape(String key, Path2 path, int index, Object... objects);
+
+  Response<List<Object>> jsonArrPop(String key, Path2 path);
+
+  Response<List<Object>> jsonArrPop(String key, Path2 path, int index);
+
+  /**
+   * <b><a href="https://redis.io/commands/json.arrpop">JSON.ARRPOP Command</a></b> Removes and
+   * returns an element from the index in the array, returning each popped element as the raw JSON
+   * text sent by the server.
+   * @param key the key holding the JSON document
+   * @param path the JSONPath to the array(s)
+   * @param index the position in the array to pop from; negative values count from the end
+   * @return the popped elements as raw JSON text, one per matched path, or {@code null} for a
+   *         matched value that is not an array or is an empty array
+   * @since 8.1
+   */
+  Response<List<String>> jsonArrPopRaw(String key, Path2 path, int index);
+
+  Response<List<Long>> jsonArrLen(String key, Path2 path);
+
+  Response<List<Long>> jsonArrTrim(String key, Path2 path, int start, int stop);
+}

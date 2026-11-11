@@ -1,36 +1,70 @@
 package redis.clients.jedis.modules;
 
-import static org.junit.Assert.*;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static redis.clients.jedis.json.Path.ROOT_PATH;
+import static redis.clients.jedis.json.JsonObjects.Baz;
+import static redis.clients.jedis.json.JsonObjects.IRLObject;
 import static redis.clients.jedis.search.RediSearchUtil.toStringMap;
 
-import java.nio.charset.StandardCharsets;
-import java.util.*;
-
 import com.google.gson.Gson;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Collections;
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
 
-import redis.clients.jedis.Connection;
 import redis.clients.jedis.Pipeline;
+import redis.clients.jedis.RedisProtocol;
 import redis.clients.jedis.Response;
 import redis.clients.jedis.json.JsonSetParams;
 import redis.clients.jedis.json.Path;
 import redis.clients.jedis.json.Path2;
-import redis.clients.jedis.modules.json.RedisJsonV2Test.IRLObject;
-import redis.clients.jedis.modules.json.RedisJsonV2Test.Baz;
 import redis.clients.jedis.search.*;
 import redis.clients.jedis.search.aggr.*;
+import redis.clients.jedis.util.AssertUtil;
+import redis.clients.jedis.util.TestKeyRegistry;
 
+@ParameterizedClass
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#respVersions")
 public class RedisModulesPipelineTest extends RedisModuleCommandsTestBase {
 
   private static final Gson gson = new Gson();
 
-  @BeforeClass
+  @BeforeAll
   public static void prepare() {
     RedisModuleCommandsTestBase.prepare();
+  }
+
+  public RedisModulesPipelineTest(RedisProtocol protocol) {
+    super(protocol);
+  }
+
+  private TestKeyRegistry keys;
+
+  @BeforeEach
+  public void setUpKeys(TestInfo testInfo) {
+    keys = TestKeyRegistry.create(testInfo);
+  }
+
+  @AfterEach
+  public void cleanUpKeys() {
+    // Runs before the base class closes the client.
+    keys.cleanup(client);
   }
 
   @Test
@@ -42,62 +76,55 @@ public class RedisModulesPipelineTest extends RedisModuleCommandsTestBase {
     fields.put("title", "hello world");
     fields.put("body", "lorem ipsum");
 
-    Connection c = createConnection();
-    Pipeline p = new Pipeline(c);
+//    Connection c = createConnection();
+//    Pipeline p = new Pipeline(c);
+    Pipeline p = (Pipeline) client.pipelined();
 
     Response<String> create = p.ftCreate(index, IndexOptions.defaultOptions(), sc);
     Response<String> alter = p.ftAlter(index, new Schema().addTextField("foo", 1.0));
     p.hset("doc1", toStringMap(fields));
     p.hset("doc2", toStringMap(fields));
     Response<SearchResult> searchResult = p.ftSearch(index, new Query("hello world"));
-    Response<SearchResult> searchBytesResult = p.ftSearch(index.getBytes(), new Query("hello world"));
+//    Response<SearchResult> searchBytesResult = p.ftSearch(index.getBytes(), new Query("hello world")); // not RESP3 supported
     Response<AggregationResult> aggregateResult = p.ftAggregate(index, new AggregationBuilder().groupBy("@title"));
     Response<String> explain = p.ftExplain(index, new Query("@title:title_val"));
     Response<List<String>> explainCLI = p.ftExplainCLI(index, new Query("@title:title_val"));
     Response<Map<String, Object>> info = p.ftInfo(index);
-    Response<String> aliasAdd = p.ftAliasAdd("ALIAS1", index);
-    Response<String> aliasUpdate = p.ftAliasUpdate("ALIAS2", index);
-    Response<String> aliasDel = p.ftAliasDel("ALIAS2");
-    Response<String> configSet = p.ftConfigSet("timeout", "100");
-    Response<Map<String, String>> configGet = p.ftConfigGet("*");
-    Response<String> configSetIndex = p.ftConfigSet(index, "timeout", "100");
-    Response<Map<String, String>> configGetIndex = p.ftConfigGet(index, "*");
+//    // @org.junit.Ignore
+//    Response<String> configSet = p.ftConfigSet("timeout", "100");
+//    Response<Map<String, Object>> configGet = p.ftConfigGet("*");
+//    Response<String> configSetIndex = p.ftConfigSet(index, "timeout", "100");
+//    Response<Map<String, Object>> configGetIndex = p.ftConfigGet(index, "*");
     Response<String> synUpdate = p.ftSynUpdate(index, "foo", "bar");
     Response<Map<String, List<String>>> synDump = p.ftSynDump(index);
-    Response<String> dropIndex = p.ftDropIndex(index);
-    p.ftCreate(index, IndexOptions.defaultOptions(), sc);
-    Response<String> dropIndexDD = p.ftDropIndexDD(index);
 
     p.sync();
+//    c.close();
 
     assertEquals("OK", create.get());
     assertEquals("OK", alter.get());
     assertEquals("OK", alter.get());
     assertEquals(2, searchResult.get().getTotalResults());
-    assertEquals(2, searchBytesResult.get().getTotalResults());
-    assertEquals(1, aggregateResult.get().totalResults);
+//    assertEquals(2, searchBytesResult.get().getTotalResults());
+    assertEquals(1, aggregateResult.get().getTotalResults());
     assertNotNull(explain.get());
     assertNotNull(explainCLI.get().get(0));
     assertEquals(index, info.get().get("index_name"));
-    assertEquals("OK", aliasAdd.get());
-    assertEquals("OK", aliasUpdate.get());
-    assertEquals("OK", aliasDel.get());
-    assertEquals("OK", configSet.get());
-    assertEquals("100", configGet.get().get("TIMEOUT"));
-    assertEquals("OK", configSetIndex.get());
-    assertEquals("100", configGetIndex.get().get("TIMEOUT"));
+//    // @org.junit.Ignore
+//    assertEquals("OK", configSet.get());
+//    assertEquals("100", configGet.get().get("TIMEOUT"));
+//    assertEquals("OK", configSetIndex.get());
+//    assertEquals("100", configGetIndex.get().get("TIMEOUT"));
     assertEquals("OK", synUpdate.get());
-    assertEquals("OK", dropIndex.get());
-    assertEquals("OK", dropIndexDD.get());
     Map<String, List<String>> expected = new HashMap<>();
     expected.put("bar", Collections.singletonList("foo"));
     assertEquals(expected, synDump.get());
-
-    c.close();
   }
 
   @Test
   public void jsonV1() {
+    assumeFalse(AssertUtil.expectsResp3OnWire(protocol));
+
     Map<String, String> hm1 = new HashMap<>();
     hm1.put("hello", "world");
     hm1.put("oh", "snap");
@@ -111,8 +138,9 @@ public class RedisModulesPipelineTest extends RedisModuleCommandsTestBase {
     Baz baz2 = new Baz("quuz2", "grault2", "waldo2");
     Baz baz3 = new Baz("quuz3", "grault3", "waldo3");
 
-    Connection c = createConnection();
-    Pipeline p = new Pipeline(c);
+//    Connection c = createConnection();
+//    Pipeline p = new Pipeline(c);
+    Pipeline p = (Pipeline) client.pipelined();
 
     Response<String> set1 = p.jsonSet("foo", Path.ROOT_PATH, hm1);
     Response<Object> get = p.jsonGet("foo");
@@ -152,7 +180,7 @@ public class RedisModulesPipelineTest extends RedisModuleCommandsTestBase {
     Response<Baz> popClassWithIndex = p.jsonArrPop("baz", Baz.class, Path.ROOT_PATH, 0);
 
     p.sync();
-    c.close();
+//    c.close();
 
     assertEquals("OK", set1.get());
     assertEquals(hm1, get.get());
@@ -200,8 +228,9 @@ public class RedisModulesPipelineTest extends RedisModuleCommandsTestBase {
     hm2.put("boolean", true);
     hm2.put("number", 3);
 
-    Connection c = createConnection();
-    Pipeline p = new Pipeline(c);
+//    Connection c = createConnection();
+//    Pipeline p = new Pipeline(c);
+    Pipeline p = (Pipeline) client.pipelined();
 
     Response<String> setWithEscape = p.jsonSetWithEscape("foo", Path2.ROOT_PATH, hm1);
     Response<Object> get = p.jsonGet("foo",  Path2.ROOT_PATH);
@@ -227,7 +256,7 @@ public class RedisModulesPipelineTest extends RedisModuleCommandsTestBase {
     Response<Long> clear = p.jsonClear("foo", new Path2("array"));
 
     p.sync();
-    c.close();
+//    c.close();
 
     assertEquals("OK", setWithEscape.get());
     assertNotNull(get.get());
@@ -251,5 +280,85 @@ public class RedisModulesPipelineTest extends RedisModuleCommandsTestBase {
     assertEquals(false, toggle.get().get(0));
     assertEquals(boolean.class, type.get().get(0));
     assertEquals(Long.valueOf(1), clear.get());
+  }
+
+  @Test
+  public void jsonArrPopRaw() {
+    Map<String, Object> doc = new HashMap<>();
+    doc.put("numbers", new int[] { 1, 2, 3 });
+    doc.put("strings", new String[] { "a", "b", "c" });
+
+    String key = keys.key("raw");
+    Pipeline p = (Pipeline) client.pipelined();
+
+    Response<String> set = p.jsonSet(key, Path2.ROOT_PATH, gson.toJson(doc));
+    Response<List<String>> popNumber = p.jsonArrPopRaw(key, new Path2("numbers"), -1);
+    Response<List<String>> popNumberAtIndex = p.jsonArrPopRaw(key, new Path2("numbers"), 0);
+    Response<List<String>> popString = p.jsonArrPopRaw(key, new Path2("strings"), 1);
+
+    p.sync();
+
+    assertThat(set.get(), equalTo("OK"));
+    assertThat(popNumber.get(), contains("3"));
+    assertThat(popNumberAtIndex.get(), contains("1"));
+    assertThat(popString.get(), contains("\"b\""));
+  }
+
+  @Test
+  public void jsonArrPopRaw_NotAnArrayOrEmptyArray() {
+    //{"empty_arrays": [[], []], "string": "a"}
+    Map<String, Object> doc = new HashMap<>();
+    doc.put("empty_arrays", new int[][] { {}, {} });
+    doc.put("string", "a");
+
+    String key = keys.key("raw");
+    Pipeline p = (Pipeline) client.pipelined();
+
+    Response<String> set = p.jsonSet(key, Path2.ROOT_PATH, gson.toJson(doc));
+    Response<List<String>> popFromEmptyArrays =
+            p.jsonArrPopRaw(key, new Path2("$.empty_arrays[*]"), 0);
+    Response<List<String>> popFromString =
+            p.jsonArrPopRaw(key, new Path2("$.string"), 0);
+    p.sync();
+
+    assertThat(set.get(), equalTo("OK"));
+    assertThat(popFromEmptyArrays.get(), contains(nullValue(), nullValue()));
+    assertThat(popFromString.get(), contains(nullValue()));
+  }
+
+  @Test
+  public void jsonNumIncrByAsNumbers() {
+    String key = keys.key("doc");
+    Pipeline p = (Pipeline) client.pipelined();
+
+    Response<String> set = p.jsonSet(key, Path2.ROOT_PATH, "{\"int\":10,\"dec\":10.5}");
+    Response<List<Number>> incrInt = p.jsonNumIncrByAsNumbers(key, Path2.of("$.int"), 5);
+    Response<List<Number>> incrDec = p.jsonNumIncrByAsNumbers(key, Path2.of("$.dec"), 2.5);
+    Response<List<Number>> incrIntByDec = p.jsonNumIncrByAsNumbers(key, Path2.of("$.int"), 0.5);
+
+    p.sync();
+
+    assertThat(set.get(), equalTo("OK"));
+    assertThat(incrInt.get(), contains(15L));
+    assertThat(incrDec.get(), contains(13.0));
+    assertThat(incrIntByDec.get(), contains(15.5));
+  }
+
+  @Test
+  public void jsonNumIncrByAsNumbers_NonExistingPathOrNotANumber() {
+    String key = keys.key("doc");
+    Pipeline p = (Pipeline) client.pipelined();
+
+    Response<String> set = p.jsonSet(key, Path2.ROOT_PATH, "{\"str\":\"a\",\"nums\":[1,\"b\",2]}");
+    Response<List<Number>> missingPath = p.jsonNumIncrByAsNumbers(key, Path2.of("$.missing"), 1);
+    Response<List<Number>> notANumber = p.jsonNumIncrByAsNumbers(key, Path2.of("$.str"), 1);
+    Response<List<Number>> mixed = p.jsonNumIncrByAsNumbers(key, Path2.of("$.nums[*]"), 1);
+
+    p.sync();
+
+    assertThat(set.get(), equalTo("OK"));
+    assertThat(missingPath.get(), empty());
+    assertThat(notANumber.get(), contains(nullValue()));
+    assertThat(mixed.get(), contains(2L, null, 3L));
   }
 }

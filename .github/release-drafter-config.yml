@@ -1,23 +1,15 @@
-name-template: '$NEXT_MAJOR_VERSION'
-tag-template: 'v$NEXT_MAJOR_VERSION'
-autolabeler:
-  - label: 'chore'
-    files:
-      - '*.md'
-      - '.github/*'
-  - label: 'bug'
-    branch:
-      - '/bug-.+'
-  - label: 'chore'
-    branch:
-      - '/chore-.+'
-  - label: 'feature'
-    branch:
-      - '/feature-.+'
+# Shared by master and maintenance branches; the workflow passes the
+# branch, version, tag and name as inputs. Read from the default branch only.
+name-template: '$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+filter-by-commitish: true
 categories:
-  - title: 'Breaking Changes'
+  - title: '🔥 Breaking Changes'
     labels:
       - 'breakingchange'
+  - title: '🧪 Experimental Features'
+    labels:
+      - 'experimental'
   - title: '🚀 New Features'
     labels:
       - 'feature'
@@ -29,12 +21,21 @@ categories:
       - 'bug'
       - 'BUG'
   - title: '🧰 Maintenance'
-    label: 'chore'
+    labels:
+      - 'maintenance'
+      - 'dependencies'
+      - 'documentation'
+      - 'docs'
+      - 'testing'
 change-template: '- $TITLE (#$NUMBER)'
+replacers:
+  - search: '/Backport #\d+ to [\d.x]+: /g'
+    replace: ''
 exclude-labels:
   - 'skip-changelog'
+  - 'churn'
 template: |
-  ## Changes
+  # Changes
 
   $CHANGES
 

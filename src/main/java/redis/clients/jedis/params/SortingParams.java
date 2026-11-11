@@ -1,27 +1,20 @@
 package redis.clients.jedis.params;
 
-import static redis.clients.jedis.Protocol.Keyword.ALPHA;
-import static redis.clients.jedis.Protocol.Keyword.ASC;
-import static redis.clients.jedis.Protocol.Keyword.BY;
-import static redis.clients.jedis.Protocol.Keyword.DESC;
-import static redis.clients.jedis.Protocol.Keyword.GET;
-import static redis.clients.jedis.Protocol.Keyword.LIMIT;
-import static redis.clients.jedis.Protocol.Keyword.NOSORT;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 import redis.clients.jedis.CommandArguments;
 import redis.clients.jedis.Protocol;
+import redis.clients.jedis.Protocol.Keyword;
+import redis.clients.jedis.args.SortingOrder;
 import redis.clients.jedis.util.SafeEncoder;
 
 /**
  * Builder Class for {@code SORT} command parameters.
  */
+// TODO:
 public class SortingParams implements IParams {
-  private final List<byte[]> params = new ArrayList<>();
+
+  private final List<Object> params = new ArrayList<>();
 
   /**
    * Sort by weight in keys.
@@ -52,7 +45,7 @@ public class SortingParams implements IParams {
    * @return the SortingParams Object
    */
   public SortingParams by(final byte[] pattern) {
-    params.add(BY.getRaw());
+    params.add(Keyword.BY);
     params.add(pattern);
     return this;
   }
@@ -60,18 +53,14 @@ public class SortingParams implements IParams {
   /**
    * No sorting.
    * <p>
-   * This is useful if you want to retrieve a external key (using {@link #get(String...) GET}) but
+   * This is useful if you want to retrieve an external key (using {@link #get(String...) GET}) but
    * you don't want the sorting overhead.
    * @return the SortingParams Object
    */
   public SortingParams nosort() {
-    params.add(BY.getRaw());
-    params.add(NOSORT.getRaw());
+    params.add(Keyword.BY);
+    params.add(Keyword.NOSORT);
     return this;
-  }
-
-  public Collection<byte[]> getParams() {
-    return Collections.unmodifiableCollection(params);
   }
 
   /**
@@ -79,8 +68,7 @@ public class SortingParams implements IParams {
    * @return the sortingParams Object
    */
   public SortingParams desc() {
-    params.add(DESC.getRaw());
-    return this;
+    return sortingOrder(SortingOrder.DESC);
   }
 
   /**
@@ -88,7 +76,16 @@ public class SortingParams implements IParams {
    * @return the SortingParams Object
    */
   public SortingParams asc() {
-    params.add(ASC.getRaw());
+    return sortingOrder(SortingOrder.ASC);
+  }
+
+  /**
+   * Get by the Sorting Order.
+   * @param order the Sorting order
+   * @return the SortingParams object
+   */
+  public SortingParams sortingOrder(SortingOrder order) {
+    params.add(order.getRaw());
     return this;
   }
 
@@ -99,9 +96,9 @@ public class SortingParams implements IParams {
    * @return the SortingParams Object
    */
   public SortingParams limit(final int start, final int count) {
-    params.add(LIMIT.getRaw());
-    params.add(Protocol.toByteArray(start));
-    params.add(Protocol.toByteArray(count));
+    params.add(Keyword.LIMIT);
+    params.add(start);
+    params.add(count);
     return this;
   }
 
@@ -111,7 +108,7 @@ public class SortingParams implements IParams {
    * @return the SortingParams Object
    */
   public SortingParams alpha() {
-    params.add(ALPHA.getRaw());
+    params.add(Keyword.ALPHA);
     return this;
   }
 
@@ -131,8 +128,8 @@ public class SortingParams implements IParams {
    */
   public SortingParams get(String... patterns) {
     for (final String pattern : patterns) {
-      params.add(GET.getRaw());
-      params.add(SafeEncoder.encode(pattern));
+      params.add(Keyword.GET);
+      params.add(pattern);
     }
     return this;
   }
@@ -153,7 +150,7 @@ public class SortingParams implements IParams {
    */
   public SortingParams get(byte[]... patterns) {
     for (final byte[] pattern : patterns) {
-      params.add(GET.getRaw());
+      params.add(Keyword.GET);
       params.add(pattern);
     }
     return this;
@@ -161,8 +158,19 @@ public class SortingParams implements IParams {
 
   @Override
   public void addParams(CommandArguments args) {
-    for (byte[] param : params) {
-      args.add(param);
-    }
+    args.addObjects(params);
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    SortingParams that = (SortingParams) o;
+    return Objects.equals(params, that.params);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(params);
   }
 }

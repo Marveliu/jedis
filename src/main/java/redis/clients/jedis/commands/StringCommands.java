@@ -2,80 +2,446 @@ package redis.clients.jedis.commands;
 
 import java.util.List;
 
-import redis.clients.jedis.args.BitCountOption;
-import redis.clients.jedis.args.BitOP;
-import redis.clients.jedis.params.BitPosParams;
 import redis.clients.jedis.params.GetExParams;
 import redis.clients.jedis.params.SetParams;
-import redis.clients.jedis.params.StrAlgoLCSParams;
+import redis.clients.jedis.params.MSetExParams;
+
+import redis.clients.jedis.params.IncrexFloatParams;
+import redis.clients.jedis.params.IncrexParams;
+import redis.clients.jedis.params.LCSParams;
 import redis.clients.jedis.resps.LCSMatchResult;
 
-public interface StringCommands {
+public interface StringCommands extends BitCommands {
 
+  /**
+   * <b><a href="http://redis.io/commands/set">Set Command</a></b>
+   * Set the string value as value of the key. The string can't be longer than 1073741824 bytes (1 GB).
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @param value
+   * @return OK
+   */
   String set(String key, String value);
 
+  /**
+   * <b><a href="http://redis.io/commands/set">Set Command</a></b>
+   * Set the string value as value of the key. Can be used with optional params.
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @param value
+   * @param params {@link SetParams}
+   * @return simple-string-reply {@code OK} if {@code SET} was executed correctly, or {@code null}
+   * if the {@code SET} operation was not performed because the user specified the NX or XX option
+   * but the condition was not met.
+   */
   String set(String key, String value, SetParams params);
 
+  /**
+   * <b><a href="http://redis.io/commands/get">Get Command</a></b>
+   * Get the value of the specified key. If the key does not exist the special value 'nil' is
+   * returned. If the value stored at key is not a string an error is returned because GET can only
+   * handle string values.
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @return The value stored in key
+   */
   String get(String key);
 
+  String setGet(String key, String value);
+
+  String setGet(String key, String value, SetParams params);
+
+  /**
+   * <b><a href="http://redis.io/commands/getdel">GetDel Command</a></b>
+   * Get the value of key and delete the key. This command is similar to GET, except for the fact
+   * that it also deletes the key on success (if and only if the key's value type is a string).
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @return The value stored in key
+   */
   String getDel(String key);
 
+  /**
+   * <b><a href="http://redis.io/commands/getex">GetEx Command</a></b>
+   * Get the value of key and optionally set its expiration. GETEX is similar to {@link StringCommands#get(String) GET},
+   * but is a write command with additional options:
+   * EX seconds -- Set the specified expire time, in seconds.
+   * PX milliseconds -- Set the specified expire time, in milliseconds.
+   * EXAT timestamp-seconds -- Set the specified Unix time at which the key will expire, in seconds.
+   * PXAT timestamp-milliseconds -- Set the specified Unix time at which the key will expire, in milliseconds.
+   * PERSIST -- Remove the time to live associated with the key.
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @param params {@link GetExParams}
+   * @return The value stored in key
+   */
   String getEx(String key, GetExParams params);
 
-  boolean setbit(String key, long offset, boolean value);
-
-  boolean getbit(String key, long offset);
-
+  /**
+   * <b><a href="http://redis.io/commands/setrange">SetRange Command</a></b>
+   * GETRANGE overwrite part of the string stored at key, starting at the specified offset, for the entire
+   * length of value. If the offset is larger than the current length of the string at key, the string is
+   * padded with zero-bytes to make offset fit. Non-existing keys are considered as empty strings, so this
+   * command will make sure it holds a string large enough to be able to set value at offset.
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @param offset
+   * @param value
+   * @return The length of the string after it was modified by the command
+   */
   long setrange(String key, long offset, String value);
 
+  /**
+   * <b><a href="http://redis.io/commands/getrange">GetRange Command</a></b>
+   * Return the substring of the string value stored at key, determined by the offsets start
+   * and end (both are inclusive). Negative offsets can be used in order to provide an offset starting
+   * from the end of the string. So -1 means the last character, -2 the penultimate and so forth.
+   * <p>
+   * Time complexity: O(N) where N is the length of the returned string
+   * @param key
+   * @param startOffset
+   * @param endOffset
+   * @return The substring
+   */
   String getrange(String key, long startOffset, long endOffset);
 
+  /**
+   * <b><a href="http://redis.io/commands/getset">GetSet Command</a></b>
+   * GETSET is an atomic set this value and return the old value command. Set key to the string
+   * value and return the old value stored at key. The string can't be longer than 1073741824 byte (1 GB).
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @param value
+   * @return The old value that was stored in key
+   * @deprecated Use {@link StringCommands#setGet(java.lang.String, java.lang.String)}.
+   */
+  @Deprecated
   String getSet(String key, String value);
 
+  /**
+   * <b><a href="http://redis.io/commands/setnx">SetNX Command</a></b>
+   * SETNX works exactly like {@link StringCommands#set(String, String) SET} with the only difference that if
+   * the key already exists no operation is performed. SETNX actually means "SET if Not Exists".
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @param value
+   * @return 1 if the key was set, 0 otherwise
+   * @deprecated Use {@link StringCommands#set(String, String, SetParams)} with {@link SetParams#nx()}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 2.6.12.
+   */
+  @Deprecated
   long setnx(String key, String value);
 
+  /**
+   * <b><a href="http://redis.io/commands/setex">SetEx Command</a></b>
+   * The command is exactly equivalent to the following group of commands:
+   * {@link StringCommands#set(String, String) SET} + {@link KeyBinaryCommands#expire(byte[], long) EXPIRE}.
+   * The operation is atomic.
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @param seconds
+   * @param value
+   * @return OK
+   * @deprecated Use {@link StringCommands#set(String, String, SetParams)} with {@link SetParams#ex(long)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 2.6.12.
+   */
+  @Deprecated
   String setex(String key, long seconds, String value);
 
+  /**
+   * <b><a href="http://redis.io/commands/psetex">PSetEx Command</a></b>
+   * PSETEX works exactly like {@link StringCommands#setex(String, long, String) SETEX} with the sole difference
+   * that the expire time is specified in milliseconds instead of seconds.
+   * <p>
+   * Time complexity: O(1)
+   * @param key
+   * @param milliseconds
+   * @param value
+   * @return OK
+   * @deprecated Use {@link StringCommands#set(String, String, SetParams)} with {@link SetParams#px(long)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 2.6.12.
+   */
+  @Deprecated
   String psetex(String key, long milliseconds, String value);
 
+  /**
+   * <b><a href="http://redis.io/commands/mget">MGet Command</a></b>
+   * Get the values of all the specified keys.
+   * <p>
+   * At least one key must be supplied; otherwise the server returns an error.
+   * <p>
+   * Time complexity: O(1) for every key
+   *
+   * @param keys the keys to get
+   * @return a list of values in the same order as {@code keys};
+   *         entries are {@code null} for keys that do not exist or do not hold a string value
+   */
   List<String> mget(String... keys);
 
+  /**
+   * <b><a href="http://redis.io/commands/mset">MSet Command</a></b>
+   * Set the respective keys to the respective values. MSET will replace old values with new
+   * values, while {@link StringCommands#msetnx(String...) MSETNX} will not perform any operation at all even
+   * if just a single key already exists.
+   * <p>
+   * Because of this semantic MSETNX can be used in order to set different keys representing
+   * different fields of an unique logic object in a way that ensures that either all the fields or
+   * none at all are set.
+   * <p>
+   * Both MSET and MSETNX are atomic operations. This means that for instance if the keys A and B
+   * are modified, another connection talking to Redis can either see the changes to both A and B at
+   * once, or no modification at all.
+   * @param keysvalues pairs of keys and their values
+   *                   e.g mset("foo", "foovalue", "bar", "barvalue")
+   * @return OK
+   */
   String mset(String... keysvalues);
 
+  /**
+   * <b><a href="http://redis.io/commands/msetnx">MSetNX Command</a></b>
+   * Set the respective keys to the respective values. {@link StringCommands#mset(String...) MSET} will
+   * replace old values with new values, while MSETNX will not perform any operation at all even if
+   * just a single key already exists.
+   * <p>
+   * Because of this semantic MSETNX can be used in order to set different keys representing
+   * different fields of an unique logic object in a way that ensures that either all the fields or
+   * none at all are set.
+   * <p>
+   * Both MSET and MSETNX are atomic operations. This means that for instance if the keys A and B
+   * are modified, another connection talking to Redis can either see the changes to both A and B at
+   * once, or no modification at all.
+   * @param keysvalues pairs of keys and their values
+   *                   e.g msetnx("foo", "foovalue", "bar", "barvalue")
+   * @return 1 if the all the keys were set, 0 if no key was set (at least one key already existed)
+   */
   long msetnx(String... keysvalues);
 
+  /**
+   * Multi-set with optional condition and expiration.
+   * <p>
+   * Sets the respective keys to the respective values, similar to {@link #mset(String...) MSET},
+   * but allows conditional set (NX|XX) and expiration options via {@link MSetExParams}.
+   * If the condition is not met for any key, no key is set.
+   * <p>
+   * Both MSET and MSETEX are atomic operations. This means that if multiple keys are provided,
+   * another client will either see the changes for all keys at once, or no changes at all.
+   * <p>
+   * Options (in {@link MSetExParams}): NX or XX, and expiration: EX seconds | PX milliseconds |
+   * EXAT unix-time-seconds | PXAT unix-time-milliseconds | KEEPTTL.
+   * <p>
+   * Time complexity: O(N) where N is the number of keys to set.
+   * @param params condition and expiration parameters
+   * @param keysvalues pairs of keys and their values, e.g. {@code msetex(params, "foo", "foovalue", "bar", "barvalue")}
+   * @return {@code true} if all the keys were set, {@code false} if none were set (condition not satisfied)
+   * @see #mset(String...)
+   * @see #msetnx(String...)
+   */
+  boolean msetex(MSetExParams params, String... keysvalues);
+
+  /**
+   * <b><a href="http://redis.io/commands/incr">Incr Command</a></b>
+   * Increment the number stored at key by one. If the key does not exist or contains a value of a
+   * wrong type, set the key to the value of "0" before to perform the increment operation.
+   * <p>
+   * INCR commands are limited to 64-bit signed integers.
+   * <p>
+   * Note: this is actually a string operation, that is, in Redis there are not "integer" types.
+   * Simply the string stored at the key is parsed as a base 10 64-bit signed integer, incremented,
+   * and then converted back as a string.
+   * <p>
+   * Time complexity: O(1)
+   * @param key the key to increment
+   * @return The value of the key after the increment
+   */
   long incr(String key);
 
+  /**
+   * <b><a href="http://redis.io/commands/incrby">IncrBy Command</a></b>
+   * INCRBY work just like {@link StringCommands#incr(String) INCR} but instead to increment by 1 the
+   * increment is integer.
+   * <p>
+   * INCR commands are limited to 64-bit signed integers.
+   * <p>
+   * Note: this is actually a string operation, that is, in Redis there are not "integer" types.
+   * Simply the string stored at the key is parsed as a base 10 64-bit signed integer, incremented,
+   * and then converted back as a string.
+   * <p>
+   * Time complexity: O(1)
+   * @param key the key to increment
+   * @param increment the value to increment by
+   * @return The value of the key after the increment
+   */
   long incrBy(String key, long increment);
 
+  /**
+   * <b><a href="http://redis.io/commands/incrbyfloat">IncrByFloat Command</a></b>
+   * INCRBYFLOAT work just like {@link StringCommands#incrBy(String, long)} INCRBY} but increments by floats
+   * instead of integers.
+   * <p>
+   * INCRBYFLOAT commands are limited to double precision floating point values.
+   * <p>
+   * Note: this is actually a string operation, that is, in Redis there are not "double" types.
+   * Simply the string stored at the key is parsed as a base double precision floating point value,
+   * incremented, and then converted back as a string. There is no DECRYBYFLOAT but providing a
+   * negative value will work as expected.
+   * <p>
+   * Time complexity: O(1)
+   * @param key the key to increment
+   * @param increment the value to increment by
+   * @return The value of the key after the increment
+   */
   double incrByFloat(String key, double increment);
 
+  /**
+   * <b><a href="http://redis.io/commands/increx">INCREX Command</a></b>
+   * Increment the integer number stored at key by 1. If the key does not exist, it is set to 0
+   * before performing the operation.
+   * <p>
+   * Time complexity: O(1)
+   * @param key the key
+   * @return a 2-element list: {@code [newValue, appliedIncrement]}
+   * @since 8.0
+   */
+  List<Long> increx(String key);
+
+  /**
+   * <b><a href="http://redis.io/commands/increx">INCREX Command</a></b>
+   * Increment the integer number stored at key by {@code increment}, with optional lower/upper
+   * bounds, saturation, and expiration control. If the key does not exist, it is initialized to 0.
+   * <p>
+   * Time complexity: O(1)
+   * @param key the key
+   * @param increment the integer amount to increment by (may be negative)
+   * @param params optional bounds ({@code LBOUND}/{@code UBOUND}), {@code SATURATE} flag, and
+   *        expiration ({@code EX}/{@code PX}/{@code EXAT}/{@code PXAT}/{@code PERSIST}/{@code ENX})
+   * @return a 2-element list: {@code [newValue, appliedIncrement]}. The applied increment may
+   *         differ from the requested increment when {@code SATURATE} is active and the result is
+   *         clamped to a bound, and is {@code 0} when the operation is silently rejected for being
+   *         out of bounds without {@code SATURATE}.
+   * @since 8.0
+   */
+  List<Long> increx(String key, long increment, IncrexParams params);
+
+  /**
+   * <b><a href="http://redis.io/commands/increx">INCREX Command</a></b>
+   * Increment the floating-point number stored at key by {@code increment}, with optional
+   * lower/upper bounds, saturation, and expiration control. If the key does not exist, it is
+   * initialized to 0.
+   * <p>
+   * Note: the key value must be a valid floating-point number. Attempting to use this method on a
+   * key holding an integer-only value such as {@code "1"} is valid, but using it on a value like
+   * {@code "1.5"} with the integer variant ({@link #increx(String, long, IncrexParams)}) will
+   * return an error.
+   * <p>
+   * Time complexity: O(1)
+   * @param key the key
+   * @param increment the floating-point amount to increment by (may be negative)
+   * @param params optional bounds ({@code LBOUND}/{@code UBOUND}), {@code SATURATE} flag, and
+   *        expiration ({@code EX}/{@code PX}/{@code EXAT}/{@code PXAT}/{@code PERSIST}/{@code ENX})
+   * @return a 2-element list: {@code [newValue, appliedIncrement]}. The applied increment may
+   *         differ from the requested increment when {@code SATURATE} is active and the result is
+   *         clamped to a bound, and is {@code 0} when the operation is silently rejected for being
+   *         out of bounds without {@code SATURATE}.
+   * @since 8.0
+   */
+  List<Double> increx(String key, double increment, IncrexFloatParams params);
+
+  /**
+   * <b><a href="http://redis.io/commands/decr">Decr Command</a></b>
+   * Decrement the number stored at key by one. If the key does not exist or contains a value of a
+   * wrong type, set the key to the value of "0" before to perform the decrement operation.
+   * <p>
+   * DECR commands are limited to 64-bit signed integers.
+   * <p>
+   * Note: this is actually a string operation, that is, in Redis there are not "integer" types.
+   * Simply the string stored at the key is parsed as a base 10 64-bit signed integer, incremented,
+   * and then converted back as a string.
+   * <p>
+   * Time complexity: O(1)
+   * @param key the key to decrement
+   * @return The value of the key after the decrement
+   */
   long decr(String key);
 
+  /**
+   * <b><a href="http://redis.io/commands/decrby">DecrBy Command</a></b>
+   * DECRBY work just like {@link StringCommands#decr(String) DECR} but instead to decrement by 1 the
+   * decrement is integer.
+   * <p>
+   * DECRBY commands are limited to 64-bit signed integers.
+   * <p>
+   * Note: this is actually a string operation, that is, in Redis there are not "integer" types.
+   * Simply the string stored at the key is parsed as a base 10 64-bit signed integer, incremented,
+   * and then converted back as a string.
+   * <p>
+   * Time complexity: O(1)
+   * @param key the key to decrement
+   * @param decrement the value to decrement by
+   * @return The value of the key after the decrement
+   */
   long decrBy(String key, long decrement);
 
+  /**
+   * <b><a href="http://redis.io/commands/append">Append Command</a></b>
+   * If the key already exists and is a string, this command appends the provided value at the end
+   * of the string. If the key does not exist it is created and set as an empty string, so APPEND
+   * will be very similar to SET in this special case.
+   * <p>
+   * Time complexity: O(1). The amortized time complexity is O(1) assuming the appended value is
+   * small and the already present value is of any size, since the dynamic string library used by
+   * Redis will double the free space available on every reallocation.
+   * @param key the key to append to
+   * @param value the value to append
+   * @return The total length of the string after the append operation.
+   */
   long append(String key, String value);
 
+  /**
+   * <b><a href="http://redis.io/commands/substr">SubStr Command</a></b>
+   * Return a subset of the string from offset start to offset end (both offsets are inclusive).
+   * Negative offsets can be used in order to provide an offset starting from the end of the string.
+   * So -1 means the last char, -2 the penultimate and so forth.
+   * <p>
+   * The function handles out of range requests without raising an error, but just limiting the
+   * resulting range to the actual length of the string.
+   * <p>
+   * Time complexity: O(start+n) (with start being the start index and n the total length of the
+   * requested range). Note that the lookup part of this command is O(1) so for small strings this
+   * is actually an O(1) command.
+   * @param key
+   * @param start
+   * @param end
+   * @return The substring
+   * @deprecated Use {@link StringCommands#getrange(String, long, long)}.
+   * Deprecated in Jedis 7.3.0. Mirrors Redis deprecation since 2.0.0.
+   */
+  @Deprecated
   String substr(String key, int start, int end);
 
+  /**
+   * <b><a href="http://redis.io/commands/strlen">StrLen Command</a></b>
+   * Return the length of the string value stored at key.
+   * @param key
+   * @return The length of the string at key, or 0 when key does not exist
+   */
   long strlen(String key);
 
-  long bitcount(String key);
-
-  long bitcount(String key, long start, long end);
-
-  long bitcount(String key, long start, long end, BitCountOption option);
-
-  long bitpos(String key, boolean value);
-
-  long bitpos(String key, boolean value, BitPosParams params);
-
-  List<Long> bitfield(String key, String...arguments);
-
-  List<Long> bitfieldReadonly(String key, String...arguments);
-
-  long bitop(BitOP op, String destKey, String... srcKeys);
-
-  LCSMatchResult strAlgoLCSKeys(String keyA, String keyB, StrAlgoLCSParams params);
+  /**
+   * Calculate the longest common subsequence of keyA and keyB.
+   * @param keyA
+   * @param keyB
+   * @param params
+   * @return According to LCSParams to decide to return content to fill LCSMatchResult.
+   */
+  LCSMatchResult lcs(String keyA, String keyB, LCSParams params);
 
 }

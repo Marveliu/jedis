@@ -1,31 +1,96 @@
 package redis.clients.jedis.util;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import org.junit.ComparisonFailure;
+import org.opentest4j.AssertionFailedError;
+import redis.clients.jedis.RedisProtocol;
+import redis.clients.jedis.UnifiedJedis;
 
 public class AssertUtil {
 
-  public static boolean assertCollectionContains(Collection<byte[]> array, byte[] expected) {
+  public static void assertOK(String str) {
+    assertEquals("OK", str);
+  }
+
+  /**
+   * Waits until RediSearch reports that {@code index} contains exactly {@code expected} documents,
+   * then asserts it. Indexing can lag behind the HSET writes, so tests that query right after a
+   * bulk load should call this first (otherwise the query may run against a partially built index).
+   * Polls {@code FT.INFO num_docs} up to 10 times before asserting.
+   */
+  public static void assertIndexSize(UnifiedJedis jedis, String index, long expected) {
+    long actual = -1;
+    // allow search time to catch up
+    for (int i = 0; i < 60; i++) {
+      Map<String, Object> info = jedis.ftInfo(index);
+      actual = Long.parseLong(String.valueOf(info.get("num_docs")));
+      if (actual == expected) {
+        break;
+      }
+      try {
+        Thread.sleep(500);
+      } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+      }
+    }
+    assertEquals(expected, actual);
+  }
+
+  public static void assertEqualsByProtocol(RedisProtocol protocol, Object expectedResp2,
+      Object expectedResp3, Object actual) {
+    if (expectsResp3OnWire(protocol)) {
+      assertEquals(expectedResp3, actual);
+    } else {
+      assertEquals(expectedResp2, actual);
+    }
+  }
+
+  /**
+   * Returns {@code true} when the parametrized {@link RedisProtocol} value corresponds to RESP3 on
+   * the wire for {@link redis.clients.jedis.UnifiedJedis}-based tests. {@code null} is the alias
+   * for "auto-negotiate" which resolves to RESP3 on the test environment.
+   * <p>
+   * Do not use this helper in legacy {@link redis.clients.jedis.Jedis} tests — there, {@code null}
+   * means "no HELLO sent / assumes RESP2", so a direct {@code protocol == RedisProtocol.RESP3}
+   * comparison is the right check.
+   */
+  public static boolean expectsResp3OnWire(RedisProtocol protocol) {
+    return protocol == null || protocol == RedisProtocol.RESP3;
+  }
+
+  public static <T> boolean assertCollectionContains(Collection<T> array, T expected) {
+    for (T element : array) {
+      if (Objects.equals(element, expected)) {
+        return true;
+      }
+    }
+    throw new AssertionFailedError("element is missing", Objects.toString(expected),
+        array.toString());
+  }
+
+  public static boolean assertByteArrayCollectionContains(Collection<byte[]> array,
+      byte[] expected) {
     for (byte[] bytes : array) {
       if (Arrays.equals(bytes, expected)) {
         return true;
       }
     }
-    throw new ComparisonFailure("element is missing", Arrays.toString(expected), array.toString());
+    throw new AssertionFailedError("element is missing", Arrays.toString(expected),
+        array.toString());
   }
 
   public static void assertByteArrayListEquals(List<byte[]> expected, List<byte[]> actual) {
     assertEquals(expected.size(), actual.size());
     for (int n = 0; n < expected.size(); n++) {
-      assertArrayEquals(expected.get(n), actual.get(n));
+      assertArrayEquals(expected.get(n), actual.get(n), n + "'th elements don't match");
     }
   }
 
@@ -42,7 +107,8 @@ public class AssertUtil {
         }
       }
       if (!contained) {
-        throw new ComparisonFailure("element is missing", Arrays.toString(next), actual.toString());
+        throw new AssertionFailedError("element is missing", Arrays.toString(next),
+            actual.toString());
       }
     }
   }
@@ -59,7 +125,7 @@ public class AssertUtil {
         }
       }
       if (!found) {
-        throw new ComparisonFailure("element is missing", Objects.toString(fo), all.toString());
+        throw new AssertionFailedError("element is missing", Objects.toString(fo), all.toString());
       }
     }
   }
@@ -77,9 +143,52 @@ public class AssertUtil {
         }
       }
       if (!found) {
-        throw new ComparisonFailure("element is missing", Arrays.toString(fo), all.toString());
+        throw new AssertionFailedError("element is missing", Arrays.toString(fo), all.toString());
       }
     }
   }
 
+  public static void assertPipelineSyncAll(List<Object> expected, List<Object> actual) {
+    assertEquals(expected.size(), actual.size());
+    for (int n = 0; n < expected.size(); n++) {
+      Object expObj = expected.get(n);
+      Object actObj = actual.get(n);
+      if (expObj instanceof List) {
+        if (!(actObj instanceof List)) {
+          throw new AssertionFailedError(n + "'th element is not a list",
+              expObj.getClass().toString(), actObj.getClass().toString());
+        }
+        assertPipelineSyncAll((List) expObj, (List) actObj);
+      } else if (expObj instanceof List) {
+        if (!(actObj instanceof List)) {
+          throw new AssertionFailedError(n + "'th element is not a list",
+              expObj.getClass().toString(), actObj.getClass().toString());
+        }
+        assertPipelineSyncAll((List) expObj, (List) actObj);
+      } else if (expObj instanceof Set) {
+        if (!(actObj instanceof Set)) {
+          throw new AssertionFailedError(n + "'th element is not a set",
+              expObj.getClass().toString(), actObj.getClass().toString());
+        }
+        assertPipelineSyncAllSet((Set) expObj, (Set) actObj);
+      } else if (expObj instanceof byte[]) {
+        if (!(actObj instanceof byte[])) {
+          throw new AssertionFailedError(n + "'th element is not byte array",
+              expObj.getClass().toString(), actObj.getClass().toString());
+        }
+        assertArrayEquals((byte[]) expObj, (byte[]) actObj);
+      } else {
+        assertEquals(expObj, actObj, n + "'th element mismatched");
+      }
+    }
+  }
+
+  private static void assertPipelineSyncAllSet(Set<?> expected, Set<?> actual) {
+    assertEquals(expected.size(), actual.size());
+    if (expected.iterator().next() instanceof byte[]) {
+      assertByteArraySetEquals((Set<byte[]>) expected, (Set<byte[]>) actual);
+    } else {
+      assertEquals(expected, actual);
+    }
+  }
 }

@@ -1,6 +1,12 @@
 package redis.clients.jedis;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static redis.clients.jedis.Protocol.Command.INCR;
 import static redis.clients.jedis.Protocol.Command.GET;
 import static redis.clients.jedis.Protocol.Command.SET;
@@ -8,13 +14,25 @@ import static redis.clients.jedis.Protocol.Command.SET;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-import redis.clients.jedis.exceptions.JedisDataException;
-import redis.clients.jedis.util.SafeEncoder;
 
+import io.redis.test.annotations.ConditionalOnEnv;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import redis.clients.jedis.exceptions.JedisDataException;
+import redis.clients.jedis.util.EnvCondition;
+import redis.clients.jedis.util.SafeEncoder;
+import redis.clients.jedis.util.TestEnvUtil;
+
+@Tag("integration")
+@ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
 public class ReliableTransactionTest {
+
+  @RegisterExtension
+  public static EnvCondition envCondition = new EnvCondition();
 
   final byte[] bfoo = { 0x01, 0x02, 0x03, 0x04 };
   final byte[] bbar = { 0x05, 0x06, 0x07, 0x08 };
@@ -23,20 +41,27 @@ public class ReliableTransactionTest {
 
   final byte[] bmykey = { 0x42, 0x02, 0x03, 0x04 };
 
-  private static final HostAndPort hnp = HostAndPorts.getRedisServers().get(0);
+  private static EndpointConfig endpoint;
 
   private Connection conn;
   private Jedis nj;
 
-  @Before
-  public void setUp() throws Exception {
-    conn = new Connection(hnp, DefaultJedisClientConfig.builder().timeoutMillis(500).password("foobared").build());
+  @BeforeAll
+  public static void prepareEndpoint() {
+    endpoint = Endpoints.getRedisEndpoint("standalone0");
+  }
 
-    nj = new Jedis(hnp, DefaultJedisClientConfig.builder().timeoutMillis(500).password("foobared").build());
+  @BeforeEach
+  public void setUp() throws Exception {
+    conn = new Connection(endpoint.getHostAndPort(),
+        endpoint.getClientConfigBuilder().timeoutMillis(500).build());
+
+    nj = new Jedis(endpoint.getHostAndPort(),
+        endpoint.getClientConfigBuilder().serverDefaultProtocol().timeoutMillis(500).build());
     nj.flushAll();
   }
 
-  @After
+  @AfterEach
   public void tearDown() throws Exception {
     nj.close();
     conn.close();
@@ -182,13 +207,13 @@ public class ReliableTransactionTest {
     assertArrayEquals("foo".getBytes(), set.get());
   }
 
-  @Test(expected = IllegalStateException.class)
+  @Test
   public void transactionResponseWithinPipeline() {
     nj.set("string", "foo");
 
     ReliableTransaction t = new ReliableTransaction(conn);
     Response<String> string = t.get("string");
-    string.get();
+    assertThrows(IllegalStateException.class, string::get);
     t.exec();
   }
 
@@ -211,10 +236,6 @@ public class ReliableTransactionTest {
 
   @Test
   public void testCloseable() {
-    // we need to test with fresh instance of Jedis
-//    Jedis jedis2 = new Jedis(hnp.getHost(), hnp.getPort(), 500);
-//    jedis2.auth("foobared");
-
     ReliableTransaction transaction = new ReliableTransaction(conn);
     transaction.set("a", "1");
     transaction.set("b", "2");

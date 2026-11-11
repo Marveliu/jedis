@@ -1,6 +1,14 @@
 package redis.clients.jedis.commands.jedis;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.ArgumentMatchers.any;
 
 import static redis.clients.jedis.Protocol.Command.INCR;
 import static redis.clients.jedis.Protocol.Command.GET;
@@ -11,17 +19,30 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
 
-import redis.clients.jedis.DefaultJedisClientConfig;
+import io.redis.test.annotations.ConditionalOnEnv;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
+
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.Protocol;
+import redis.clients.jedis.PushConsumerChain;
+import redis.clients.jedis.RedisProtocol;
 import redis.clients.jedis.Response;
 import redis.clients.jedis.Transaction;
+import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisDataException;
+import redis.clients.jedis.util.RedisInputStream;
 import redis.clients.jedis.util.SafeEncoder;
+import redis.clients.jedis.util.TestEnvUtil;
 
+@ParameterizedClass
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#jedisRespVersions")
 public class TransactionCommandsTest extends JedisCommandsTestBase {
   final byte[] bfoo = { 0x01, 0x02, 0x03, 0x04 };
   final byte[] bbar = { 0x05, 0x06, 0x07, 0x08 };
@@ -32,15 +53,20 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
 
   Jedis nj;
 
-  @Before
+  public TransactionCommandsTest(RedisProtocol protocol) {
+    super(protocol);
+  }
+
+  @BeforeEach
   @Override
   public void setUp() throws Exception {
     super.setUp();
 
-    nj = new Jedis(hnp, DefaultJedisClientConfig.builder().timeoutMillis(500).password("foobared").build());
+    nj = new Jedis(endpoint.getHostAndPort(),
+        endpoint.getClientConfigBuilder().serverDefaultProtocol().timeoutMillis(500).build());
   }
 
-  @After
+  @AfterEach
   @Override
   public void tearDown() throws Exception {
     nj.close();
@@ -81,6 +107,7 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void watch() throws UnknownHostException, IOException {
     jedis.watch("mykey", "somekey");
     Transaction t = jedis.multi();
@@ -134,10 +161,10 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
     assertEquals("OK", resp.get(0));
   }
 
-  @Test(expected = IllegalStateException.class)
+  @Test
   public void validateWhenInMulti() {
     jedis.multi();
-    jedis.ping();
+    assertThrows(IllegalStateException.class, () -> jedis.ping());
   }
 
   @Test
@@ -148,6 +175,47 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  public void discardFail() {
+    Transaction trans = jedis.multi();
+    trans.set("a", "a");
+    trans.set("b", "b");
+
+    try (MockedStatic<Protocol> protocol = Mockito.mockStatic(Protocol.class)) {
+      protocol.when(() -> Protocol.read(any(RedisInputStream.class), any(PushConsumerChain.class))).thenThrow(JedisConnectionException.class);
+
+      trans.discard();
+      fail("Should get mocked JedisConnectionException.");
+    } catch (JedisConnectionException jce) {
+      // should be here
+    } finally {
+      // close() should pass
+      trans.close();
+    }
+    assertTrue(jedis.isBroken());
+  }
+
+  @Test
+  public void execFail() {
+    Transaction trans = jedis.multi();
+    trans.set("a", "a");
+    trans.set("b", "b");
+
+    try (MockedStatic<Protocol> protocol = Mockito.mockStatic(Protocol.class)) {
+      protocol.when(() -> Protocol.read(any(RedisInputStream.class), any(PushConsumerChain.class))).thenThrow(JedisConnectionException.class);
+
+      trans.exec();
+      fail("Should get mocked JedisConnectionException.");
+    } catch (JedisConnectionException jce) {
+      // should be here
+    } finally {
+      // close() should pass
+      trans.close();
+    }
+    assertTrue(jedis.isBroken());
+  }
+
+  @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void transactionResponse() {
     jedis.set("string", "foo");
     jedis.lpush("list", "foo");
@@ -171,6 +239,7 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void transactionResponseBinary() {
     jedis.set("string", "foo");
     jedis.lpush("list", "foo");
@@ -193,13 +262,13 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
     assertArrayEquals("foo".getBytes(), set.get());
   }
 
-  @Test(expected = IllegalStateException.class)
+  @Test
   public void transactionResponseWithinPipeline() {
     jedis.set("string", "foo");
 
     Transaction t = jedis.multi();
     Response<String> string = t.get("string");
-    string.get();
+    assertThrows(IllegalStateException.class, string::get);
     t.exec();
   }
 
@@ -275,6 +344,7 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
 //  }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void testResetStateWhenInWatch() {
     jedis.watch("mykey", "somekey");
 
@@ -295,7 +365,6 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
   @Test
   public void testResetStateWithFullyExecutedTransaction() {
     Jedis jedis2 = createJedis();
-    jedis2.auth("foobared");
 
     Transaction t = jedis2.multi();
     t.set("mykey", "foo");
@@ -312,8 +381,8 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
   @Test
   public void testCloseable() {
     // we need to test with fresh instance of Jedis
-    Jedis jedis2 = new Jedis(hnp.getHost(), hnp.getPort(), 500);
-    jedis2.auth("foobared");
+    Jedis jedis2 = new Jedis(endpoint.getHostAndPort(),
+        endpoint.getClientConfigBuilder().serverDefaultProtocol().timeoutMillis(500).build());;
 
     Transaction transaction = jedis2.multi();
     transaction.set("a", "1");
@@ -331,6 +400,7 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void testTransactionWithGeneralCommand() {
     Transaction t = jedis.multi();
     t.set("string", "foo");
@@ -357,6 +427,7 @@ public class TransactionCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void transactionResponseWithErrorWithGeneralCommand() {
     Transaction t = jedis.multi();
     t.set("foo", "bar");

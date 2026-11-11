@@ -1,190 +1,324 @@
-//package redis.clients.jedis.commands.unified.cluster;
-//
-//import static org.junit.Assert.assertEquals;
-//
-//import java.util.ArrayList;
-//import java.util.Collections;
-//import java.util.LinkedHashSet;
-//import java.util.List;
-//import java.util.Set;
-//
-//import org.junit.AfterClass;
-//import org.junit.Before;
-//import org.junit.BeforeClass;
-//import org.junit.Test;
-//
-//import redis.clients.jedis.params.ZAddParams;
-//import redis.clients.jedis.params.ZParams;
-//import redis.clients.jedis.resps.KeyedZSetElement;
-//import redis.clients.jedis.resps.Tuple;
-//import redis.clients.jedis.commands.unified.SortedSetCommandsTestBase;
-//
-//public class ClusterSortedSetCommandsTest extends SortedSetCommandsTestBase {
-//
-//  @BeforeClass
-//  public static void prepare() throws InterruptedException {
-//    jedis = ClusterCommandsTestHelper.initAndGetCluster();
-//  }
-//
-//  @AfterClass
-//  public static void closeCluster() {
-//    jedis.close();
-//  }
-//
-//  @AfterClass
-//  public static void resetCluster() {
-//    ClusterCommandsTestHelper.tearClusterDown();
-//  }
-//
-//  @Before
-//  public void setUp() {
-//    ClusterCommandsTestHelper.clearClusterData();
-//  }
-//
-//  @Test
-//  @Override
-//  public void zunion() {
-//    jedis.zadd("{:}foo", 1, "a");
-//    jedis.zadd("{:}foo", 2, "b");
-//    jedis.zadd("{:}bar", 2, "a");
-//    jedis.zadd("{:}bar", 2, "b");
-//
-//    ZParams params = new ZParams();
-//    params.weights(2, 2.5);
-//    params.aggregate(ZParams.Aggregate.SUM);
-//    Set<String> expected = new LinkedHashSet<>();
-//    expected.add("a");
-//    expected.add("b");
-//    assertEquals(expected, jedis.zunion(params, "{:}foo", "{:}bar"));
-//
-//    Set<Tuple> expectedTuple = new LinkedHashSet<>();
-//    expectedTuple.add(new Tuple("b", new Double(9)));
-//    expectedTuple.add(new Tuple("a", new Double(7)));
-//    assertEquals(expectedTuple, jedis.zunionWithScores(params, "{:}foo", "{:}bar"));
-//  }
-//
-//  @Test
-//  @Override
-//  public void zunionstore() {
-//    jedis.zadd("{:}foo", 1, "a");
-//    jedis.zadd("{:}foo", 2, "b");
-//    jedis.zadd("{:}bar", 2, "a");
-//    jedis.zadd("{:}bar", 2, "b");
-//
-//    assertEquals(2, jedis.zunionstore("{:}dst", "{:}foo", "{:}bar"));
-//
-//    List<Tuple> expected = new ArrayList<>();
-//    expected.add(new Tuple("a", new Double(3)));
-//    expected.add(new Tuple("b", new Double(4)));
-//    assertEquals(expected, jedis.zrangeWithScores("{:}dst", 0, 100));
-//  }
-//
-//  @Test
-//  @Override
-//  public void zunionstoreParams() {
-//    jedis.zadd("{:}foo", 1, "a");
-//    jedis.zadd("{:}foo", 2, "b");
-//    jedis.zadd("{:}bar", 2, "a");
-//    jedis.zadd("{:}bar", 2, "b");
-//
-//    ZParams params = new ZParams();
-//    params.weights(2, 2.5);
-//    params.aggregate(ZParams.Aggregate.SUM);
-//
-//    assertEquals(2, jedis.zunionstore("{:}dst", params, "{:}foo", "{:}bar"));
-//
-//    List<Tuple> expected = new ArrayList<>();
-//    expected.add(new Tuple("a", new Double(7)));
-//    expected.add(new Tuple("b", new Double(9)));
-//    assertEquals(expected, jedis.zrangeWithScores("{:}dst", 0, 100));
-//  }
-//
-//  @Test
-//  @Override
-//  public void zinter() {
-//    jedis.zadd("foo{:}", 1, "a");
-//    jedis.zadd("foo{:}", 2, "b");
-//    jedis.zadd("bar{:}", 2, "a");
-//
-//    ZParams params = new ZParams();
-//    params.weights(2, 2.5);
-//    params.aggregate(ZParams.Aggregate.SUM);
-//    assertEquals(Collections.singleton("a"), jedis.zinter(params, "foo{:}", "bar{:}"));
-//
-//    assertEquals(Collections.singleton(new Tuple("a", new Double(7))),
-//      jedis.zinterWithScores(params, "foo{:}", "bar{:}"));
-//  }
-//
-//  @Test
-//  @Override
-//  public void zinterstore() {
-//    jedis.zadd("foo{:}", 1, "a");
-//    jedis.zadd("foo{:}", 2, "b");
-//    jedis.zadd("bar{:}", 2, "a");
-//
-//    assertEquals(1, jedis.zinterstore("dst{:}", "foo{:}", "bar{:}"));
-//
-//    assertEquals(Collections.singletonList(new Tuple("a", new Double(3))),
-//        jedis.zrangeWithScores("dst{:}", 0, 100));
-//  }
-//
-//  @Test
-//  @Override
-//  public void zintertoreParams() {
-//    jedis.zadd("foo{:}", 1, "a");
-//    jedis.zadd("foo{:}", 2, "b");
-//    jedis.zadd("bar{:}", 2, "a");
-//
-//    ZParams params = new ZParams();
-//    params.weights(2, 2.5);
-//    params.aggregate(ZParams.Aggregate.SUM);
-//
-//    assertEquals(1, jedis.zinterstore("dst{:}", params, "foo{:}", "bar{:}"));
-//
-//    assertEquals(Collections.singletonList(new Tuple("a", new Double(7))),
-//        jedis.zrangeWithScores("dst{:}", 0, 100));
-//  }
-//
-//  @Test
-//  @Override
-//  public void bzpopmax() {
-//    jedis.zadd("f{:}oo", 1d, "a", ZAddParams.zAddParams().nx());
-//    jedis.zadd("f{:}oo", 10d, "b", ZAddParams.zAddParams().nx());
-//    jedis.zadd("b{:}ar", 0.1d, "c", ZAddParams.zAddParams().nx());
-//    assertEquals(new KeyedZSetElement("f{:}oo", "b", 10d), jedis.bzpopmax(0, "f{:}oo", "b{:}ar"));
-//  }
-//
-//  @Test
-//  @Override
-//  public void bzpopmin() {
-//    jedis.zadd("fo{:}o", 1d, "a", ZAddParams.zAddParams().nx());
-//    jedis.zadd("fo{:}o", 10d, "b", ZAddParams.zAddParams().nx());
-//    jedis.zadd("ba{:}r", 0.1d, "c", ZAddParams.zAddParams().nx());
-//    assertEquals(new KeyedZSetElement("ba{:}r", "c", 0.1d), jedis.bzpopmin(0, "ba{:}r", "fo{:}o"));
-//  }
-//
-//  @Test
-//  @Override
-//  public void zdiff() {
-//    jedis.zadd("{:}foo", 1.0, "a");
-//    jedis.zadd("{:}foo", 2.0, "b");
-//    jedis.zadd("{:}bar", 1.0, "a");
-//
-//    assertEquals(0, jedis.zdiff("{bar}1", "{bar}2").size());
-//    assertEquals(Collections.singleton("b"), jedis.zdiff("{:}foo", "{:}bar"));
-//    assertEquals(Collections.singleton(new Tuple("b", 2.0d)), jedis.zdiffWithScores("{:}foo", "{:}bar"));
-//  }
-//
-//  @Test
-//  @Override
-//  public void zdiffStore() {
-//    jedis.zadd("foo{:}", 1.0, "a");
-//    jedis.zadd("foo{:}", 2.0, "b");
-//    jedis.zadd("bar{:}", 1.0, "a");
-//
-//    assertEquals(0, jedis.zdiffStore("{bar}3", "{bar}1", "{bar}2"));
-//    assertEquals(1, jedis.zdiffStore("bar{:}3", "foo{:}", "bar{:}"));
-//    assertEquals(Collections.singletonList("b"), jedis.zrange("bar{:}3", 0, -1));
-//  }
-//
-//}
+package redis.clients.jedis.commands.unified.cluster;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static redis.clients.jedis.util.AssertUtil.assertByteArrayListEquals;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import io.redis.test.annotations.SinceRedisVersion;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import redis.clients.jedis.RedisProtocol;
+import redis.clients.jedis.UnifiedJedis;
+import redis.clients.jedis.commands.unified.SortedSetCommandsTestBase;
+import redis.clients.jedis.exceptions.JedisClusterOperationException;
+import redis.clients.jedis.params.ZAddParams;
+import redis.clients.jedis.params.ZParams;
+import redis.clients.jedis.params.ZRangeParams;
+import redis.clients.jedis.resps.Tuple;
+import redis.clients.jedis.util.KeyValue;
+import redis.clients.jedis.util.SafeEncoder;
+
+@ParameterizedClass
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#respVersions")
+@Tag("integration")
+public class ClusterSortedSetCommandsTest extends SortedSetCommandsTestBase {
+
+  final byte[] bfoo = { 0x01, 0x02, 0x03, 0x04 };
+  final byte[] bfoo_same_hashslot = { 0x01, 0x02, 0x03, 0x04, 0x03, 0x00, 0x03, 0x1b };
+  final byte[] ba = { 0x0A };
+  final byte[] bb = { 0x0B };
+  final byte[] bc = { 0x0C };
+
+  public ClusterSortedSetCommandsTest(RedisProtocol protocol) {
+    super(protocol);
+  }
+
+  @Override
+  protected UnifiedJedis createTestClient() {
+    return ClusterCommandsTestHelper.getCleanCluster(protocol);
+  }
+
+  @AfterEach
+  public void tearDown() {
+    ClusterCommandsTestHelper.clearClusterData();
+  }
+
+  @Test
+  @Override
+  public void zunion() {
+    jedis.zadd("{:}foo", 1, "a");
+    jedis.zadd("{:}foo", 2, "b");
+    jedis.zadd("{:}bar", 2, "a");
+    jedis.zadd("{:}bar", 2, "b");
+
+    ZParams params = new ZParams();
+    params.weights(2, 2.5);
+    params.aggregate(ZParams.Aggregate.SUM);
+
+    assertThat(jedis.zunion(params, "{:}foo", "{:}bar"),
+        containsInAnyOrder("a", "b"));
+
+    assertThat(jedis.zunionWithScores(params, "{:}foo", "{:}bar"),
+        containsInAnyOrder(
+            new Tuple("b", new Double(9)),
+            new Tuple("a", new Double(7))
+        ));
+  }
+
+  @Test
+  @Override
+  public void zunionstore() {
+    jedis.zadd("{:}foo", 1, "a");
+    jedis.zadd("{:}foo", 2, "b");
+    jedis.zadd("{:}bar", 2, "a");
+    jedis.zadd("{:}bar", 2, "b");
+
+    assertEquals(2, jedis.zunionstore("{:}dst", "{:}foo", "{:}bar"));
+
+    List<Tuple> expected = new ArrayList<>();
+    expected.add(new Tuple("a", new Double(3)));
+    expected.add(new Tuple("b", new Double(4)));
+    assertEquals(expected, jedis.zrangeWithScores("{:}dst", 0, 100));
+  }
+
+  @Test
+  @Override
+  public void zunionstoreParams() {
+    jedis.zadd("{:}foo", 1, "a");
+    jedis.zadd("{:}foo", 2, "b");
+    jedis.zadd("{:}bar", 2, "a");
+    jedis.zadd("{:}bar", 2, "b");
+
+    ZParams params = new ZParams();
+    params.weights(2, 2.5);
+    params.aggregate(ZParams.Aggregate.SUM);
+
+    assertEquals(2, jedis.zunionstore("{:}dst", params, "{:}foo", "{:}bar"));
+
+    List<Tuple> expected = new ArrayList<>();
+    expected.add(new Tuple("a", new Double(7)));
+    expected.add(new Tuple("b", new Double(9)));
+    assertEquals(expected, jedis.zrangeWithScores("{:}dst", 0, 100));
+  }
+
+  @Test
+  @Override
+  public void zinter() {
+    jedis.zadd("foo{:}", 1, "a");
+    jedis.zadd("foo{:}", 2, "b");
+    jedis.zadd("bar{:}", 2, "a");
+
+    ZParams params = new ZParams();
+    params.weights(2, 2.5);
+    params.aggregate(ZParams.Aggregate.SUM);
+    assertThat(jedis.zinter(params, "foo{:}", "bar{:}"),
+        containsInAnyOrder("a"));
+
+    assertThat(jedis.zinterWithScores(params, "foo{:}", "bar{:}"),
+        containsInAnyOrder(new Tuple("a", new Double(7))));
+  }
+
+  @Test
+  @Override
+  public void zinterstore() {
+    jedis.zadd("foo{:}", 1, "a");
+    jedis.zadd("foo{:}", 2, "b");
+    jedis.zadd("bar{:}", 2, "a");
+
+    assertEquals(1, jedis.zinterstore("dst{:}", "foo{:}", "bar{:}"));
+
+    assertEquals(Collections.singletonList(new Tuple("a", new Double(3))),
+        jedis.zrangeWithScores("dst{:}", 0, 100));
+  }
+
+  @Test
+  @Override
+  public void zintertoreParams() {
+    jedis.zadd("foo{:}", 1, "a");
+    jedis.zadd("foo{:}", 2, "b");
+    jedis.zadd("bar{:}", 2, "a");
+
+    ZParams params = new ZParams();
+    params.weights(2, 2.5);
+    params.aggregate(ZParams.Aggregate.SUM);
+
+    assertEquals(1, jedis.zinterstore("dst{:}", params, "foo{:}", "bar{:}"));
+
+    assertEquals(Collections.singletonList(new Tuple("a", new Double(7))),
+        jedis.zrangeWithScores("dst{:}", 0, 100));
+  }
+
+  @Test
+  @Override
+  @SinceRedisVersion(value = "8.7.225")
+  public void zunionInterAggregateCount() {
+    jedis.zadd("s1{:}", 1, "foo");
+    jedis.zadd("s1{:}", 1, "bar");
+    jedis.zadd("s2{:}", 2, "foo");
+    jedis.zadd("s2{:}", 2, "bar");
+    jedis.zadd("s3{:}", 3, "foo");
+
+    ZParams params = new ZParams().aggregate(ZParams.Aggregate.COUNT);
+
+    assertEquals(2, jedis.zunionstore("dst{:}", params, "s1{:}", "s2{:}", "s3{:}"));
+    List<Tuple> expectedUnion = new ArrayList<>();
+    expectedUnion.add(new Tuple("bar", 2d));
+    expectedUnion.add(new Tuple("foo", 3d));
+    assertEquals(expectedUnion, jedis.zrangeWithScores("dst{:}", 0, -1));
+
+    assertEquals(1, jedis.zinterstore("dst{:}", params, "s1{:}", "s2{:}", "s3{:}"));
+    assertEquals(Collections.singletonList(new Tuple("foo", 3d)),
+        jedis.zrangeWithScores("dst{:}", 0, -1));
+
+    assertEquals(expectedUnion, jedis.zunionWithScores(params, "s1{:}", "s2{:}", "s3{:}"));
+    assertEquals(Collections.singletonList(new Tuple("foo", 3d)),
+        jedis.zinterWithScores(params, "s1{:}", "s2{:}", "s3{:}"));
+
+    ZParams paramsW = new ZParams().weights(10, 5, 3).aggregate(ZParams.Aggregate.COUNT);
+
+    assertEquals(2, jedis.zunionstore("dst{:}", paramsW, "s1{:}", "s2{:}", "s3{:}"));
+    List<Tuple> expectedUnionW = new ArrayList<>();
+    expectedUnionW.add(new Tuple("bar", 15d));
+    expectedUnionW.add(new Tuple("foo", 18d));
+    assertEquals(expectedUnionW, jedis.zrangeWithScores("dst{:}", 0, -1));
+
+    assertEquals(1, jedis.zinterstore("dst{:}", paramsW, "s1{:}", "s2{:}", "s3{:}"));
+    assertEquals(Collections.singletonList(new Tuple("foo", 18d)),
+        jedis.zrangeWithScores("dst{:}", 0, -1));
+
+    assertEquals(expectedUnionW, jedis.zunionWithScores(paramsW, "s1{:}", "s2{:}", "s3{:}"));
+    assertEquals(Collections.singletonList(new Tuple("foo", 18d)),
+        jedis.zinterWithScores(paramsW, "s1{:}", "s2{:}", "s3{:}"));
+  }
+
+  @Test
+  @Override
+  public void bzpopmax() {
+    assertNull(jedis.bzpopmax(1, "f{:}oo", "b{:}ar"));
+
+    jedis.zadd("f{:}oo", 1d, "a", ZAddParams.zAddParams().nx());
+    jedis.zadd("f{:}oo", 10d, "b", ZAddParams.zAddParams().nx());
+    jedis.zadd("b{:}ar", 0.1d, "c", ZAddParams.zAddParams().nx());
+    assertEquals(new KeyValue<>("f{:}oo", new Tuple("b", 10d)), jedis.bzpopmax(0, "f{:}oo", "b{:}ar"));
+  }
+
+  @Test
+  @Override
+  public void bzpopmin() {
+    assertNull(jedis.bzpopmin(1, "ba{:}r", "fo{:}o"));
+
+    jedis.zadd("fo{:}o", 1d, "a", ZAddParams.zAddParams().nx());
+    jedis.zadd("fo{:}o", 10d, "b", ZAddParams.zAddParams().nx());
+    jedis.zadd("ba{:}r", 0.1d, "c", ZAddParams.zAddParams().nx());
+    assertEquals(new KeyValue<>("ba{:}r", new Tuple("c", 0.1d)), jedis.bzpopmin(0, "ba{:}r", "fo{:}o"));
+  }
+
+  @Test
+  @Override
+  public void zdiff() {
+    jedis.zadd("{:}foo", 1.0, "a");
+    jedis.zadd("{:}foo", 2.0, "b");
+    jedis.zadd("{:}bar", 1.0, "a");
+
+    assertEquals(0, jedis.zdiff("{bar}1", "{bar}2").size());
+
+    assertThat(jedis.zdiff("{:}foo", "{:}bar"),
+        containsInAnyOrder("b"));
+
+    assertThat(jedis.zdiffWithScores("{:}foo", "{:}bar"),
+        containsInAnyOrder(new Tuple("b", 2.0d)));
+  }
+
+  @Test
+  @Override
+  public void zdiffstore() {
+    jedis.zadd("foo{:}", 1.0, "a");
+    jedis.zadd("foo{:}", 2.0, "b");
+    jedis.zadd("bar{:}", 1.0, "a");
+
+    assertEquals(0, jedis.zdiffstore("{bar}3", "{bar}1", "{bar}2"));
+    assertEquals(1, jedis.zdiffstore("bar{:}3", "foo{:}", "bar{:}"));
+    assertEquals(Collections.singletonList("b"), jedis.zrange("bar{:}3", 0, -1));
+  }
+
+  @Test
+  public void zrangestore() {
+    jedis.zadd("foo{.}", 1, "aa");
+    jedis.zadd("foo{.}", 2, "c");
+    jedis.zadd("foo{.}", 3, "bb");
+
+    long stored = jedis.zrangestore("bar{.}", "foo{.}", ZRangeParams.zrangeByScoreParams(1, 2));
+    assertEquals(2, stored);
+
+    List<String> range = jedis.zrange("bar{.}", 0, -1);
+    List<String> expected = new ArrayList<>();
+    expected.add("aa");
+    expected.add("c");
+    assertEquals(expected, range);
+
+    // Binary
+    jedis.zadd(bfoo, 1d, ba);
+    jedis.zadd(bfoo, 10d, bb);
+    jedis.zadd(bfoo, 0.1d, bc);
+    jedis.zadd(bfoo, 2d, ba);
+
+    long bstored = jedis.zrangestore(bfoo_same_hashslot, bfoo, ZRangeParams.zrangeParams(0, 1).rev());
+    assertEquals(2, bstored);
+
+    List<byte[]> brange = jedis.zrevrange(bfoo_same_hashslot, 0, 1);
+    List<byte[]> bexpected = new ArrayList<>();
+    bexpected.add(bb);
+    bexpected.add(ba);
+    assertByteArrayListEquals(bexpected, brange);
+  }
+
+  @Test
+  public void zrangestoreCrossSlotKeys() {
+    // "bar" (slot 5061) and "foo" (slot 12182); rejected client-side because the source key is
+    // registered for slot computation, not only the destination
+    assertCrossSlotRejected(() -> jedis.zrangestore("bar", "foo",
+        ZRangeParams.zrangeByScoreParams(1, 2)));
+    assertCrossSlotRejected(() -> jedis.zrangestore(SafeEncoder.encode("bar"),
+        SafeEncoder.encode("foo"), ZRangeParams.zrangeByScoreParams(1, 2)));
+  }
+
+  private static void assertCrossSlotRejected(Executable command) {
+    JedisClusterOperationException e = assertThrows(JedisClusterOperationException.class, command);
+    assertThat(e.getMessage(), containsString("multiple hash slots"));
+  }
+
+  @Test
+  @SinceRedisVersion(value="7.0.0")
+  public void zintercard() {
+    jedis.zadd("foo{.}", 1, "a");
+    jedis.zadd("foo{.}", 2, "b");
+    jedis.zadd("bar{.}", 2, "a");
+    jedis.zadd("bar{.}", 1, "b");
+
+    assertEquals(2, jedis.zintercard("foo{.}", "bar{.}"));
+    assertEquals(1, jedis.zintercard(1, "foo{.}", "bar{.}"));
+
+    // Binary
+    jedis.zadd(bfoo, 1, ba);
+    jedis.zadd(bfoo, 2, bb);
+    jedis.zadd(bfoo_same_hashslot, 2, ba);
+    jedis.zadd(bfoo_same_hashslot, 2, bb);
+
+    assertEquals(2, jedis.zintercard(bfoo, bfoo_same_hashslot));
+    assertEquals(1, jedis.zintercard(1, bfoo, bfoo_same_hashslot));
+  }
+
+}

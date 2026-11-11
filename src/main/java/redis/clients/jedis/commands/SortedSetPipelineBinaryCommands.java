@@ -2,15 +2,13 @@ package redis.clients.jedis.commands;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import redis.clients.jedis.Response;
-import redis.clients.jedis.params.ScanParams;
-import redis.clients.jedis.params.ZAddParams;
-import redis.clients.jedis.params.ZIncrByParams;
-import redis.clients.jedis.params.ZParams;
+import redis.clients.jedis.args.SortedSetOption;
+import redis.clients.jedis.params.*;
 import redis.clients.jedis.resps.ScanResult;
 import redis.clients.jedis.resps.Tuple;
+import redis.clients.jedis.util.KeyValue;
 
 public interface SortedSetPipelineBinaryCommands {
 
@@ -33,6 +31,10 @@ public interface SortedSetPipelineBinaryCommands {
   Response<Long> zrank(byte[] key, byte[] member);
 
   Response<Long> zrevrank(byte[] key, byte[] member);
+
+  Response<KeyValue<Long, Double>> zrankWithScore(byte[] key, byte[] member);
+
+  Response<KeyValue<Long, Double>> zrevrankWithScore(byte[] key, byte[] member);
 
   Response<List<byte[]>> zrange(byte[] key, long start, long stop);
 
@@ -114,6 +116,12 @@ public interface SortedSetPipelineBinaryCommands {
 
   Response<List<byte[]>> zrevrangeByLex(byte[] key, byte[] max, byte[] min, int offset, int count);
 
+  Response<List<byte[]>> zrange(byte[] key, ZRangeParams zRangeParams);
+
+  Response<List<Tuple>> zrangeWithScores(byte[] key, ZRangeParams zRangeParams);
+
+  Response<Long> zrangestore(byte[] dest, byte[] src, ZRangeParams zRangeParams);
+
   Response<Long> zremrangeByLex(byte[] key, byte[] min, byte[] max);
 
   default Response<ScanResult<Tuple>> zscan(byte[] key, byte[] cursor) {
@@ -122,30 +130,47 @@ public interface SortedSetPipelineBinaryCommands {
 
   Response<ScanResult<Tuple>> zscan(byte[] key, byte[] cursor, ScanParams params);
 
-  Response<List<byte[]>> bzpopmax(double timeout, byte[]... keys);
+  Response<KeyValue<byte[], Tuple>> bzpopmax(double timeout, byte[]... keys);
 
-  Response<List<byte[]>> bzpopmin(double timeout, byte[]... keys);
+  Response<KeyValue<byte[], Tuple>> bzpopmin(double timeout, byte[]... keys);
 
-  Response<Set<byte[]>> zdiff(byte[]... keys);
+  Response<List<byte[]>> zdiff(byte[]... keys);
 
-  Response<Set<Tuple>> zdiffWithScores(byte[]... keys);
+  Response<List<Tuple>> zdiffWithScores(byte[]... keys);
 
+  /**
+   * @deprecated Use {@link #zdiffstore(byte[], byte[][])}.
+   */
+  @Deprecated
   Response<Long> zdiffStore(byte[] dstkey, byte[]... keys);
 
-  Response<Set<byte[]>> zinter(ZParams params, byte[]... keys);
+  Response<Long> zdiffstore(byte[] dstkey, byte[]... keys);
 
-  Response<Set<Tuple>> zinterWithScores(ZParams params, byte[]... keys);
+  Response<List<byte[]>> zinter(ZParams params, byte[]... keys);
+
+  Response<List<Tuple>> zinterWithScores(ZParams params, byte[]... keys);
 
   Response<Long> zinterstore(byte[] dstkey, byte[]... sets);
 
   Response<Long> zinterstore(byte[] dstkey, ZParams params, byte[]... sets);
 
-  Response<Set<byte[]>> zunion(ZParams params, byte[]... keys);
+  Response<Long> zintercard(byte[]... keys);
 
-  Response<Set<Tuple>> zunionWithScores(ZParams params, byte[]... keys);
+  Response<Long> zintercard(long limit, byte[]... keys);
+
+  Response<List<byte[]>> zunion(ZParams params, byte[]... keys);
+
+  Response<List<Tuple>> zunionWithScores(ZParams params, byte[]... keys);
 
   Response<Long> zunionstore(byte[] dstkey, byte[]... sets);
 
   Response<Long> zunionstore(byte[] dstkey, ZParams params, byte[]... sets);
 
+  Response<KeyValue<byte[], List<Tuple>>> zmpop(SortedSetOption option, byte[]... keys);
+
+  Response<KeyValue<byte[], List<Tuple>>> zmpop(SortedSetOption option, int count, byte[]... keys);
+
+  Response<KeyValue<byte[], List<Tuple>>> bzmpop(double timeout, SortedSetOption option, byte[]... keys);
+
+  Response<KeyValue<byte[], List<Tuple>>> bzmpop(double timeout, SortedSetOption option, int count, byte[]... keys);
 }

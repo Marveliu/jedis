@@ -1,22 +1,47 @@
 package redis.clients.jedis.commands.jedis;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
-import org.junit.Test;
 
+import io.redis.test.annotations.EnabledOnCommand;
+import io.redis.test.annotations.SinceRedisVersion;
+import io.redis.test.annotations.ConditionalOnEnv;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
+
+
+import redis.clients.jedis.Pipeline;
 import redis.clients.jedis.Protocol;
+import redis.clients.jedis.RedisProtocol;
+import redis.clients.jedis.Response;
+import redis.clients.jedis.Transaction;
 import redis.clients.jedis.args.BitCountOption;
 import redis.clients.jedis.args.BitOP;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.params.BitPosParams;
+import redis.clients.jedis.params.BitRangeIntArrayParams;
 import redis.clients.jedis.util.SafeEncoder;
+import redis.clients.jedis.util.TestEnvUtil;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+
+@ParameterizedClass
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#jedisRespVersions")
+@Tag("integration")
 public class BitCommandsTest extends JedisCommandsTestBase {
+
+  public BitCommandsTest(RedisProtocol protocol) {
+    super(protocol);
+  }
 
   @Test
   public void setAndgetbit() {
@@ -35,6 +60,7 @@ public class BitCommandsTest extends JedisCommandsTestBase {
     String foo = "foo";
 
     jedis.set(foo, String.valueOf(0));
+    //  string "0" with bits: 0011 0000
 
     jedis.setbit(foo, 3, true);
     jedis.setbit(foo, 7, true);
@@ -42,7 +68,8 @@ public class BitCommandsTest extends JedisCommandsTestBase {
     jedis.setbit(foo, 39, true);
 
     /*
-     * byte: 0 1 2 3 4 bit: 00010001 / 00000100 / 00000000 / 00000000 / 00000001
+     * bit:  00110001 / 00000100 / 00000000 / 00000000 / 00000001
+     * byte: 0          1          2          3          4
      */
     long offset = jedis.bitpos(foo, true);
     assertEquals(2, offset);
@@ -69,6 +96,7 @@ public class BitCommandsTest extends JedisCommandsTestBase {
     byte[] bfoo = { 0x01, 0x02, 0x03, 0x04 };
 
     jedis.set(bfoo, Protocol.toByteArray(0));
+    // bits: 0011 0000
 
     jedis.setbit(bfoo, 3, true);
     jedis.setbit(bfoo, 7, true);
@@ -76,7 +104,8 @@ public class BitCommandsTest extends JedisCommandsTestBase {
     jedis.setbit(bfoo, 39, true);
 
     /*
-     * byte: 0 1 2 3 4 bit: 00010001 / 00000100 / 00000000 / 00000000 / 00000001
+     * bit:  00110001 / 00000100 / 00000000 / 00000000 / 00000001
+     * byte: 0          1          2          3          4
      */
     long offset = jedis.bitpos(bfoo, true);
     assertEquals(2, offset);
@@ -107,7 +136,8 @@ public class BitCommandsTest extends JedisCommandsTestBase {
     }
 
     /*
-     * byte: 0 bit: 11111111
+     * bit:  11111111
+     * byte: 0
      */
     long offset = jedis.bitpos(foo, false);
     // offset should be last index + 1
@@ -124,7 +154,8 @@ public class BitCommandsTest extends JedisCommandsTestBase {
     }
 
     /*
-     * byte: 0 1 2 3 4 bit: 11111111 / 11111111 / 11111111 / 11111111 / 11111111
+     * bit:  11111111 / 11111111 / 11111111 / 11111111 / 11111111
+     * byte: 0          1          2          3          4
      */
     long offset = jedis.bitpos(foo, false, new BitPosParams(2, 3));
     // offset should be -1
@@ -132,6 +163,22 @@ public class BitCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @SinceRedisVersion(value = "7.0.0", message = "7.0.0 Added the BYTE|BIT option.")
+  public void bitposModifier() {
+    jedis.set("mykey", "\\x00\\xff\\xf0");
+    assertEquals(0, jedis.bitpos("mykey", false));
+    assertEquals(1, jedis.bitpos("mykey", true));
+    assertEquals(1, jedis.bitpos("mykey", true, BitPosParams.bitPosParams()));
+    assertEquals(18, jedis.bitpos("mykey", true, BitPosParams.bitPosParams().start(2)));
+    assertEquals(18, jedis.bitpos("mykey", true, BitPosParams.bitPosParams().start(2).end(-1)));
+    assertEquals(18, jedis.bitpos("mykey", true, BitPosParams.bitPosParams().start(2).end(-1)
+        .modifier(BitCountOption.BYTE)));
+    assertEquals(9, jedis.bitpos("mykey", true, BitPosParams.bitPosParams().start(7).end(15)
+        .modifier(BitCountOption.BIT)));
+  }
+
+  @Test
+  @SinceRedisVersion("7.0.0")
   public void setAndgetrange() {
     jedis.set("key1", "Hello World");
     assertEquals(11, jedis.setrange("key1", 6, "Jedis"));
@@ -154,6 +201,15 @@ public class BitCommandsTest extends JedisCommandsTestBase {
 
     assertEquals(3, (long) jedis.bitcount("foo", 2L, 5L));
     assertEquals(3, (long) jedis.bitcount("foo".getBytes(), 2L, 5L));
+  }
+
+  @Test
+  @SinceRedisVersion("7.0.0")
+  public void bitCountModifier() {
+    jedis.setbit("foo", 16, true);
+    jedis.setbit("foo", 24, true);
+    jedis.setbit("foo", 40, true);
+    jedis.setbit("foo", 56, true);
 
     assertEquals(3, (long) jedis.bitcount("foo", 2L, 5L, BitCountOption.BYTE));
     assertEquals(3, (long) jedis.bitcount("foo".getBytes(), 2L, 5L, BitCountOption.BYTE));
@@ -163,6 +219,7 @@ public class BitCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void bitOp() {
     jedis.set("key1", "\u0060");
     jedis.set("key2", "\u0044");
@@ -181,6 +238,7 @@ public class BitCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void bitOpNot() {
     jedis.setbit("key", 0, true);
     jedis.setbit("key", 4, true);
@@ -191,6 +249,7 @@ public class BitCommandsTest extends JedisCommandsTestBase {
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void bitOpBinary() {
     byte[] dest = {0x0};
     byte[] key1 = {0x1};
@@ -213,9 +272,11 @@ public class BitCommandsTest extends JedisCommandsTestBase {
     assertArrayEquals(new byte[]{0x79}, jedis.get(dest));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void bitOpNotMultiSourceShouldFail() {
-    jedis.bitop(BitOP.NOT, "dest", "src1", "src2");
+    Assertions.assertThrows(JedisDataException.class, () -> {
+      jedis.bitop(BitOP.NOT, "dest", "src1", "src2");
+    });
   }
 
   @Test
@@ -260,6 +321,352 @@ public class BitCommandsTest extends JedisCommandsTestBase {
     List<Long> responses2 = jedis.bitfieldReadonly(SafeEncoder.encode("mykey"),
       SafeEncoder.encode("GET"), SafeEncoder.encode("i5"), SafeEncoder.encode("100"));
     assertEquals(1L, responses2.get(0).longValue());
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void bitOpDiff() {
+    // Use single-byte values for simplicity
+    byte[] key1 = new byte[] { (byte) 0b00000111 }; // bits 0,1,2 set
+    byte[] key2 = new byte[] { (byte) 0b00000010 }; // bit 1 set
+    byte[] key3 = new byte[] { (byte) 0b00000100 }; // bit 2 set
+    String destKey = "resultDiff";
+
+    // Set keys using byte arrays
+    jedis.set("key1".getBytes(), key1);
+    jedis.set("key2".getBytes(), key2);
+    jedis.set("key3".getBytes(), key3);
+
+    // DIFF(key1, key2, key3) = key1 AND NOT(key2 OR key3)
+    // key1 = 00000111 (bits 0,1,2 set)
+    // key2 = 00000010 (bit 1 set)
+    // key3 = 00000100 (bit 2 set)
+    // key2 OR key3 = 00000110 (bits 1,2 set)
+    // NOT(key2 OR key3) = 11111001 (all bits except 1,2 set)
+    // key1 AND NOT(key2 OR key3) = 00000001 (only bit 0 set)
+    jedis.bitop(BitOP.DIFF, destKey, "key1", "key2", "key3");
+
+    // Get result as bytes
+    byte[] resultBytes = jedis.get(destKey).getBytes();
+
+    // Expected result: 00000001 (only bit 0 set)
+    byte[] expectedBytes = new byte[] { (byte) 0b00000001 };
+
+    // Verify the result
+    assertArrayEquals(expectedBytes, resultBytes);
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void bitOpDiff1() {
+    // Use single-byte values for simplicity
+    byte[] key1 = new byte[] { (byte) 0x07 }; // 00000111 - bits 0,1,2 set
+    byte[] key2 = new byte[] { (byte) 0x02 }; // 00000010 - bit 1 set
+    byte[] key3 = new byte[] { (byte) 0x04 }; // 00000100 - bit 2 set
+    String destKey = "resultDiff1";
+
+    // Set keys using byte arrays
+    jedis.set("key1".getBytes(), key1);
+    jedis.set("key2".getBytes(), key2);
+    jedis.set("key3".getBytes(), key3);
+
+    // DIFF1(key1, key2, key3) = NOT(key1) AND (key2 OR key3)
+    // key1 = 00000111 (bits 0,1,2 set)
+    // key2 = 00000010 (bit 1 set)
+    // key3 = 00000100 (bit 2 set)
+    // key2 OR key3 = 00000110 (bits 1,2 set)
+    // NOT(key1) = 11111000 (all bits except 0,1,2 set)
+    // NOT(key1) AND (key2 OR key3) = 00000000 (no bits set)
+    jedis.bitop(BitOP.DIFF1, destKey, "key1", "key2", "key3");
+
+    // Get result as bytes
+    byte[] resultBytes = jedis.get(destKey).getBytes();
+
+    // Expected result: 00000000 (no bits set)
+    byte[] expectedBytes = new byte[] { (byte) 0x00 };
+
+    // Verify the result
+    assertArrayEquals(expectedBytes, resultBytes);
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void bitOpAndor() {
+    // Use single-byte values for simplicity
+    byte[] key1 = new byte[] { (byte) 0x07 }; // 00000111 - bits 0,1,2 set
+    byte[] key2 = new byte[] { (byte) 0x02 }; // 00000010 - bit 1 set
+    byte[] key3 = new byte[] { (byte) 0x04 }; // 00000100 - bit 2 set
+    String destKey = "resultAndor";
+
+    // Set keys using byte arrays
+    jedis.set("key1".getBytes(), key1);
+    jedis.set("key2".getBytes(), key2);
+    jedis.set("key3".getBytes(), key3);
+
+    // ANDOR(key1, key2, key3) = key1 AND (key2 OR key3)
+    // key1 = 00000111 (bits 0,1,2 set)
+    // key2 = 00000010 (bit 1 set)
+    // key3 = 00000100 (bit 2 set)
+    // key2 OR key3 = 00000110 (bits 1,2 set)
+    // key1 AND (key2 OR key3) = 00000110 (bits 1,2 set)
+    jedis.bitop(BitOP.ANDOR, destKey, "key1", "key2", "key3");
+
+    // Get result as bytes
+    byte[] resultBytes = jedis.get(destKey).getBytes();
+
+    // Expected result: 00000110 (bits 1,2 set)
+    byte[] expectedBytes = new byte[] { (byte) 0x06 };
+
+    // Verify the result
+    assertArrayEquals(expectedBytes, resultBytes);
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void bitOpOne() {
+    // Use single-byte values for simplicity
+    byte[] key1 = new byte[] { (byte) 0x01 }; // 00000001 - bit 0 set
+    byte[] key2 = new byte[] { (byte) 0x02 }; // 00000010 - bit 1 set
+    byte[] key3 = new byte[] { (byte) 0x04 }; // 00000100 - bit 2 set
+    String destKey = "resultOne";
+
+    // Set keys using byte arrays
+    jedis.set("key1".getBytes(), key1);
+    jedis.set("key2".getBytes(), key2);
+    jedis.set("key3".getBytes(), key3);
+
+    // ONE(key1, key2, key3) = bits set in exactly one of the inputs
+    // key1 = 00000001 (bit 0 set)
+    // key2 = 00000010 (bit 1 set)
+    // key3 = 00000100 (bit 2 set)
+    // Result = 00000111 (bits 0,1,2 set - each in exactly one input)
+    jedis.bitop(BitOP.ONE, destKey, "key1", "key2", "key3");
+
+    // Get result as bytes
+    byte[] resultBytes = jedis.get(destKey).getBytes();
+
+    // Expected result: 00000111 (bits 0,1,2 set)
+    byte[] expectedBytes = new byte[] { (byte) 0x07 };
+
+    // Verify the result
+    assertArrayEquals(expectedBytes, resultBytes);
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void bitOpDiffBinary() {
+    byte[] key1 = { (byte) 0x07 }; // 00000111 - bits 0,1,2 set
+    byte[] key2 = { (byte) 0x02 }; // 00000010 - bit 1 set
+    byte[] key3 = { (byte) 0x04 }; // 00000100 - bit 2 set
+    byte[] dest = "resultDiffBinary".getBytes();
+
+    jedis.set("key1".getBytes(), key1);
+    jedis.set("key2".getBytes(), key2);
+    jedis.set("key3".getBytes(), key3);
+
+    // DIFF(key1, key2, key3) = key1 AND NOT(key2 OR key3)
+    // key1 = 00000111 (bits 0,1,2 set)
+    // key2 = 00000010 (bit 1 set)
+    // key3 = 00000100 (bit 2 set)
+    // key2 OR key3 = 00000110 (bits 1,2 set)
+    // NOT(key2 OR key3) = 11111001 (all bits except 1,2 set)
+    // key1 AND NOT(key2 OR key3) = 00000001 (only bit 0 set)
+    jedis.bitop(BitOP.DIFF, dest, "key1".getBytes(), "key2".getBytes(), "key3".getBytes());
+
+    // Expected result: 00000001 (only bit 0 set)
+    byte[] expectedBytes = new byte[] { (byte) 0x01 };
+
+    // Verify the result
+    assertArrayEquals(expectedBytes, jedis.get(dest));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void bitOpDiff1Binary() {
+    byte[] key1 = { (byte) 0x07 }; // 00000111 - bits 0,1,2 set
+    byte[] key2 = { (byte) 0x02 }; // 00000010 - bit 1 set
+    byte[] key3 = { (byte) 0x04 }; // 00000100 - bit 2 set
+    byte[] dest = "resultDiff1Binary".getBytes();
+
+    jedis.set("key1".getBytes(), key1);
+    jedis.set("key2".getBytes(), key2);
+    jedis.set("key3".getBytes(), key3);
+
+    // DIFF1(key1, key2, key3) = NOT(key1) AND (key2 OR key3)
+    // key1 = 00000111 (bits 0,1,2 set)
+    // key2 = 00000010 (bit 1 set)
+    // key3 = 00000100 (bit 2 set)
+    // key2 OR key3 = 00000110 (bits 1,2 set)
+    // NOT(key1) = 11111000 (all bits except 0,1,2 set)
+    // NOT(key1) AND (key2 OR key3) = 00000000 (no bits set)
+    jedis.bitop(BitOP.DIFF1, dest, "key1".getBytes(), "key2".getBytes(), "key3".getBytes());
+
+    // Expected result: 00000000 (no bits set)
+    byte[] expectedBytes = new byte[] { (byte) 0x00 };
+
+    // Verify the result
+    assertArrayEquals(expectedBytes, jedis.get(dest));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void bitOpAndorBinary() {
+    byte[] key1 = { (byte) 0x07 }; // 00000111 - bits 0,1,2 set
+    byte[] key2 = { (byte) 0x02 }; // 00000010 - bit 1 set
+    byte[] key3 = { (byte) 0x04 }; // 00000100 - bit 2 set
+    byte[] dest = "resultAndorBinary".getBytes();
+
+    jedis.set("key1".getBytes(), key1);
+    jedis.set("key2".getBytes(), key2);
+    jedis.set("key3".getBytes(), key3);
+
+    // ANDOR(key1, key2, key3) = key1 AND (key2 OR key3)
+    // key1 = 00000111 (bits 0,1,2 set)
+    // key2 = 00000010 (bit 1 set)
+    // key3 = 00000100 (bit 2 set)
+    // key2 OR key3 = 00000110 (bits 1,2 set)
+    // key1 AND (key2 OR key3) = 00000110 (bits 1,2 set)
+    jedis.bitop(BitOP.ANDOR, dest, "key1".getBytes(), "key2".getBytes(), "key3".getBytes());
+
+    // Expected result: 00000110 (bits 1,2 set)
+    byte[] expectedBytes = new byte[] { (byte) 0x06 };
+
+    // Verify the result
+    assertArrayEquals(expectedBytes, jedis.get(dest));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void bitOpOneBinary() {
+    byte[] key1 = { (byte) 0x01 }; // 00000001 - bit 0 set
+    byte[] key2 = { (byte) 0x02 }; // 00000010 - bit 1 set
+    byte[] key3 = { (byte) 0x04 }; // 00000100 - bit 2 set
+    byte[] dest = "resultOneBinary".getBytes();
+
+    jedis.set("key1".getBytes(), key1);
+    jedis.set("key2".getBytes(), key2);
+    jedis.set("key3".getBytes(), key3);
+
+    // ONE(key1, key2, key3) = bits set in exactly one of the inputs
+    // key1 = 00000001 (bit 0 set)
+    // key2 = 00000010 (bit 1 set)
+    // key3 = 00000100 (bit 2 set)
+    // Result = 00000111 (bits 0,1,2 set - each in exactly one input)
+    jedis.bitop(BitOP.ONE, dest, "key1".getBytes(), "key2".getBytes(), "key3".getBytes());
+
+    // Expected result: 00000111 (bits 0,1,2 set)
+    byte[] expectedBytes = new byte[] { (byte) 0x07 };
+
+    // Verify the result
+    assertArrayEquals(expectedBytes, jedis.get(dest));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  public void bitOpDiffSingleSourceShouldFail() {
+    assertThrows(JedisDataException.class, () -> jedis.bitop(BitOP.DIFF, "dest", "src1"));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  public void bitOpDiff1SingleSourceShouldFail() {
+    assertThrows(JedisDataException.class, () -> jedis.bitop(BitOP.DIFF1, "dest", "src1"));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  public void bitOpAndorSingleSourceShouldFail() {
+    assertThrows(JedisDataException.class, () -> jedis.bitop(BitOP.ANDOR, "dest", "src1"));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  public void bitOpDiffBinarySingleSourceShouldFail() {
+    byte[] dest = "dest".getBytes();
+    byte[] src1 = "src1".getBytes();
+
+    assertThrows(JedisDataException.class, () -> jedis.bitop(BitOP.DIFF, dest, src1));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  public void bitOpDiff1BinarySingleSourceShouldFail() {
+    byte[] dest = "dest".getBytes();
+    byte[] src1 = "src1".getBytes();
+
+    assertThrows(JedisDataException.class, () -> jedis.bitop(BitOP.DIFF1, dest, src1));
+  }
+
+  @Test
+  @SinceRedisVersion("8.1.240")
+  public void bitOpAndorBinarySingleSourceShouldFail() {
+    byte[] dest = "dest".getBytes();
+    byte[] src1 = "src1".getBytes();
+
+    assertThrows(JedisDataException.class, () -> jedis.bitop(BitOP.ANDOR, dest, src1));
+  }
+
+  // ---- BITRANGEINTARRAY ----
+
+  private static final List<Long> FA_OFFSETS = Arrays.asList(0L, 7L, 8L, 15L, 16L, 23L, 24L, 31L);
+
+  private void writeFA(String key) {
+    for (long o : FA_OFFSETS) {
+      jedis.setbit(key, o, true);
+    }
+  }
+
+  /** Jedis.bitrangeintarray with String and byte[] keys, without and with params. */
+  @Test
+  @EnabledOnCommand("BITRANGEINTARRAY")
+  public void bitrangeintarray() {
+    writeFA("fa");
+    BitRangeIntArrayParams params = BitRangeIntArrayParams.bitRangeIntArrayParams()
+        .unit(BitCountOption.BIT).limit(3);
+    List<Long> firstThree = Arrays.asList(0L, 7L, 8L);
+
+    assertEquals(FA_OFFSETS, jedis.bitrangeintarray("fa", 0, -1));
+    assertEquals(firstThree, jedis.bitrangeintarray("fa", 0, -1, params));
+
+    byte[] key = SafeEncoder.encode("fa");
+    assertEquals(FA_OFFSETS, jedis.bitrangeintarray(key, 0, -1));
+    assertEquals(firstThree, jedis.bitrangeintarray(key, 0, -1, params));
+  }
+
+  /** In a pipeline, FA's offsets and an empty list for a missing key. */
+  @Test
+  @EnabledOnCommand("BITRANGEINTARRAY")
+  public void bitrangeintarrayPipeline() {
+    writeFA("fa");
+    Pipeline p = jedis.pipelined();
+    Response<List<Long>> fa = p.bitrangeintarray("fa", 0, -1);
+    Response<List<Long>> missing = p.bitrangeintarray("missing", 0, -1);
+    p.sync();
+
+    assertEquals(FA_OFFSETS, fa.get());
+    assertEquals(Collections.emptyList(), missing.get());
+  }
+
+  /** In a transaction, the exec result holds FA's offsets. */
+  @Test
+  @EnabledOnCommand("BITRANGEINTARRAY")
+  public void bitrangeintarrayTransaction() {
+    writeFA("fa");
+    Transaction t = jedis.multi();
+    Response<List<Long>> fa = t.bitrangeintarray("fa", 0, -1);
+    List<Object> results = t.exec();
+
+    assertEquals(1, results.size());
+    assertEquals(FA_OFFSETS, results.get(0));
+    assertEquals(FA_OFFSETS, fa.get());
   }
 
 }

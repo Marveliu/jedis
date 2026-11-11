@@ -1,12 +1,18 @@
 package redis.clients.jedis.commands.unified;
 
-import static org.junit.Assert.assertEquals;
-
-import org.junit.Test;
-
+import io.redis.test.annotations.ConditionalOnEnv;
+import org.junit.jupiter.api.Test;
+import redis.clients.jedis.RedisProtocol;
 import redis.clients.jedis.util.SafeEncoder;
+import redis.clients.jedis.util.TestEnvUtil;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public abstract class HyperLogLogCommandsTestBase extends UnifiedJedisCommandsTestBase {
+
+  public HyperLogLogCommandsTestBase(RedisProtocol protocol) {
+    super(protocol);
+  }
 
   @Test
   public void pfadd() {
@@ -46,6 +52,7 @@ public abstract class HyperLogLogCommandsTestBase extends UnifiedJedisCommandsTe
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void pfcounts() {
     long status = jedis.pfadd("hll_1", "foo", "bar", "zap");
     assertEquals(1, status);
@@ -90,6 +97,7 @@ public abstract class HyperLogLogCommandsTestBase extends UnifiedJedisCommandsTe
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void pfmerge() {
     long status = jedis.pfadd("hll1", "foo", "bar", "zap", "a");
     assertEquals(1, status);
@@ -105,6 +113,7 @@ public abstract class HyperLogLogCommandsTestBase extends UnifiedJedisCommandsTe
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void pfmergeBinary() {
     byte[] bHll1 = SafeEncoder.encode("hll1");
     byte[] bHll2 = SafeEncoder.encode("hll2");

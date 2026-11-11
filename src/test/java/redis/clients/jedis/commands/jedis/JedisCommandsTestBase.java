@@ -1,35 +1,71 @@
 package redis.clients.jedis.commands.jedis;
 
-import org.junit.After;
-import org.junit.Before;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.BeforeAll;
 
-import redis.clients.jedis.DefaultJedisClientConfig;
-import redis.clients.jedis.HostAndPort;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.HostAndPorts;
+import redis.clients.jedis.*;
+import redis.clients.jedis.util.EnabledOnCommandCondition;
+import redis.clients.jedis.util.EnvCondition;
+import redis.clients.jedis.util.RedisVersionCondition;
 
+@Tag("integration")
 public abstract class JedisCommandsTestBase {
 
-  protected static final HostAndPort hnp = HostAndPorts.getRedisServers().get(0);
+  protected static EndpointConfig endpoint;
+
+  @RegisterExtension
+  public RedisVersionCondition versionCondition = new RedisVersionCondition(
+      () -> Endpoints.getRedisEndpoint("standalone0"));
+  @RegisterExtension
+  public EnabledOnCommandCondition enabledOnCommandCondition = new EnabledOnCommandCondition(
+      () -> Endpoints.getRedisEndpoint("standalone0"));
+  @RegisterExtension
+  public static EnvCondition envCondition = new EnvCondition();
+
+  @BeforeAll
+  public static void prepareEndpoint() {
+    endpoint = Endpoints.getRedisEndpoint("standalone0");
+  }
+
+  protected final RedisProtocol protocol;
 
   protected Jedis jedis;
 
-  public JedisCommandsTestBase() {
-    super();
+  /**
+   * The RESP protocol is to be injected by the subclasses, usually via JUnit
+   * parameterized tests, because most of the subclassed tests are meant to be
+   * executed against multiple RESP versions. For the special cases where a single
+   * RESP version is relevant, we still force the subclass to be explicit and
+   * call this constructor.
+   *
+   * @param protocol The RESP protocol to use during the tests.
+   */
+  public JedisCommandsTestBase(RedisProtocol protocol) {
+    this.protocol = protocol;
   }
 
-  @Before
+  @BeforeEach
   public void setUp() throws Exception {
-    jedis = new Jedis(hnp, DefaultJedisClientConfig.builder().timeoutMillis(500).password("foobared").build());
+    jedis = new Jedis(endpoint.getHostAndPort(), endpoint.getClientConfigBuilder()
+        .protocol(protocol).autoNegotiateProtocol(false).timeoutMillis(500).build());
     jedis.flushAll();
   }
 
-  @After
+  @AfterEach
   public void tearDown() throws Exception {
+    try {
+      jedis.flushAll();
+    } catch (RuntimeException e) {
+      // ignore — cleanup only
+    }
     jedis.close();
   }
 
   protected Jedis createJedis() {
-    return new Jedis(hnp, DefaultJedisClientConfig.builder().password("foobared").build());
+    return new Jedis(endpoint.getHostAndPort(), endpoint.getClientConfigBuilder()
+        .protocol(protocol).autoNegotiateProtocol(false).build());
   }
 }

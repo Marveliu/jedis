@@ -1,0 +1,58 @@
+name: Publish Docs
+on:
+  push:
+    branches: ["master"]
+  workflow_run:
+    workflows: ["Benchmarks"]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to GitHub Pages'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+jobs:
+  build-and-deploy:
+    concurrency: ci-${{ github.ref }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: master
+      - uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r docs/requirements.txt
+      - name: Build docs
+        run: |
+          mkdocs build -d docsbuild
+      - name: Pull benchmark dashboard
+        uses: actions/checkout@v6
+        with:
+          ref: benchmark-data
+          path: benchmark-data
+      - name: Embed benchmark dashboard into site
+        run: |
+          mkdir -p docsbuild/benchmarks
+          cp -r benchmark-data/jedis/* docsbuild/benchmarks/
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: 'docsbuild'
+      - name: Deploy to GitHub Pages
+        if: github.event_name != 'workflow_dispatch' || inputs.deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

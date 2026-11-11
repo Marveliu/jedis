@@ -1,10 +1,43 @@
 package redis.clients.jedis;
 
+import java.util.function.Supplier;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocketFactory;
 
+import redis.clients.jedis.authentication.AuthXManager;
+import redis.clients.jedis.json.JsonObjectMapper;
+import redis.clients.jedis.search.SearchProtocol;
+
 public interface JedisClientConfig {
+
+  default RedisProtocol getRedisProtocol() {
+    return null;
+  }
+
+  /**
+   * Whether the client should auto-negotiate the highest RESP protocol available with the server
+   * when no protocol is explicitly requested.
+   * <p>
+   * When this returns {@code true} and {@link #getRedisProtocol()} is {@code null}, the client
+   * sends {@code HELLO 3} on connect and gracefully falls back to RESP2 if the server does not
+   * support RESP3. When {@code false} and the protocol is {@code null}, the client preserves the
+   * legacy behaviour of skipping {@code HELLO} entirely and assuming RESP2 on the wire.
+   * </p>
+   * <p>
+   * When {@link #getRedisProtocol()} is non-{@code null}, this flag is ignored — the requested
+   * protocol is enforced strictly.
+   * </p>
+   * <p>
+   * The legacy {@link Jedis} class does not support RESP3 wire format, so it ignores this flag and
+   * emits a warning when callers leave it enabled.
+   * </p>
+   * @return {@code true} to auto-negotiate the protocol (default), {@code false} to preserve legacy
+   *         {@code HELLO}-less behaviour
+   */
+  default boolean isAutoNegotiateProtocol() {
+    return true;
+  }
 
   /**
    * @return Connection timeout in milliseconds
@@ -22,7 +55,7 @@ public interface JedisClientConfig {
 
   /**
    * @return Socket timeout (in milliseconds) to use during blocking operation. Default is '0',
-   * which means to block forever.
+   *         which means to block forever.
    */
   default int getBlockingSocketTimeoutMillis() {
     return 0;
@@ -39,7 +72,14 @@ public interface JedisClientConfig {
     return null;
   }
 
-  default void updatePassword(String password) {
+  // TODO: return null
+  default Supplier<RedisCredentials> getCredentialsProvider() {
+    return new DefaultRedisCredentialsProvider(
+        new DefaultRedisCredentials(getUser(), getPassword()));
+  }
+
+  default AuthXManager getAuthXManager() {
+    return null;
   }
 
   default int getDatabase() {
@@ -51,17 +91,59 @@ public interface JedisClientConfig {
   }
 
   /**
-   * @return <code>true</code> - to create a TLS connection. <code>false</code> - otherwise.
+   * Whether TLS/SSL should be used for connections.
+   * <p>
+   * A TLS connection is established when this returns {@code true} or when {@link #getSslOptions()}
+   * returns a non-{@code null} value. If both are provided, {@link #getSslOptions()} takes
+   * precedence.
+   * @return {@code true} if TLS/SSL is enabled, {@code false} otherwise
+   * @see #getSslOptions()
    */
   default boolean isSsl() {
     return false;
   }
 
+  /**
+   * Custom {@link SSLSocketFactory} to use for TLS connections.
+   * <p>
+   * Consulted only when {@link #getSslOptions()} returns {@code null}. Implementations should
+   * return {@code null} to use the JVM default.
+   * @return custom SSL socket factory, or {@code null} to use the default
+   * @see #getSslOptions()
+   * @deprecated since 7.4.2, use {@link #getSslOptions()} instead.
+   */
+  @Deprecated
   default SSLSocketFactory getSslSocketFactory() {
     return null;
   }
 
+  /**
+   * Custom {@link SSLParameters} to apply to TLS sockets.
+   * <p>
+   * Consulted only when {@link #getSslOptions()} returns {@code null}. Implementations should
+   * return {@code null} to let the client apply defaults (which enable HTTPS hostname
+   * verification).
+   * @return custom SSL parameters, or {@code null} for defaults
+   * @see #getSslOptions()
+   * @deprecated since 7.4.2, use {@link #getSslOptions()} instead.
+   */
+  @Deprecated
   default SSLParameters getSslParameters() {
+    return null;
+  }
+
+  /**
+   * TLS/SSL configuration. Recommended way to configure TLS connections.
+   * <p>
+   * When non-{@code null}, TLS is enabled and this takes precedence over
+   * {@link #getSslSocketFactory()} and {@link #getSslParameters()}. Implementations should return
+   * {@code null} to fall back to {@link #isSsl()} / {@link #getSslSocketFactory()} /
+   * {@link #getSslParameters()}.
+   * @return TLS configuration, or {@code null} if not configured
+   * @see SslOptions
+   * @see SslVerifyMode
+   */
+  default SslOptions getSslOptions() {
     return null;
   }
 
@@ -71,6 +153,61 @@ public interface JedisClientConfig {
 
   default HostAndPortMapper getHostAndPortMapper() {
     return null;
+  }
+
+  /**
+   * Execute READONLY command to connections.
+   * <p>
+   * READONLY command is specific to Redis Cluster replica nodes. So this config param is only
+   * intended for Redis Cluster connections.
+   * @return {@code true} - to execute READONLY command to connection(s). {@code false} - otherwise.
+   */
+  default boolean isReadOnlyForRedisClusterReplicas() {
+    return false;
+  }
+
+  /**
+   * Modify the behavior of internally executing CLIENT SETINFO command.
+   * @return CLIENT SETINFO config
+   */
+  default ClientSetInfoConfig getClientSetInfoConfig() {
+    return ClientSetInfoConfig.DEFAULT;
+  }
+
+  /**
+   * Optional key argument pre-processor applied to every command before it is sent. Returning
+   * {@code null} disables key rewriting.
+   * <p>
+   * <b>Not supported by the legacy {@link Jedis} class</b> — only the {@link UnifiedJedis} family
+   * ({@link RedisClient}, {@link RedisClusterClient}, {@link RedisSentinelClient},
+   * {@link MultiDbClient}) honours this value.
+   */
+  default CommandKeyArgumentPreProcessor getCommandKeyArgumentPreProcessor() {
+    return null;
+  }
+
+  /**
+   * Optional JSON object mapper used by RedisJSON commands. Returning {@code null} falls back to
+   * the library default (Gson-based).
+   * <p>
+   * <b>Not supported by the legacy {@link Jedis} class</b> — only the {@link UnifiedJedis} family
+   * ({@link RedisClient}, {@link RedisClusterClient}, {@link RedisSentinelClient},
+   * {@link MultiDbClient}) honours this value.
+   */
+  default JsonObjectMapper getJsonObjectMapper() {
+    return null;
+  }
+
+  /**
+   * Default search dialect applied to RediSearch commands when the caller does not specify one.
+   * Defaults to {@link SearchProtocol#DEFAULT_DIALECT}.
+   * <p>
+   * <b>Not supported by the legacy {@link Jedis} class</b> — only the {@link UnifiedJedis} family
+   * ({@link RedisClient}, {@link RedisClusterClient}, {@link RedisSentinelClient},
+   * {@link MultiDbClient}) honours this value.
+   */
+  default int getSearchDialect() {
+    return SearchProtocol.DEFAULT_DIALECT;
   }
 
 }

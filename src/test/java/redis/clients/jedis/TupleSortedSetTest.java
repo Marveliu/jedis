@@ -1,14 +1,20 @@
 package redis.clients.jedis;
 
-import static org.junit.Assert.assertEquals;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import org.junit.Test;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.MethodSource;
+
 import redis.clients.jedis.resps.Tuple;
 import redis.clients.jedis.commands.jedis.JedisCommandsTestBase;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@ParameterizedClass
+@MethodSource("redis.clients.jedis.commands.CommandsTestsParameters#jedisRespVersions")
 public class TupleSortedSetTest extends JedisCommandsTestBase {
   final byte[] bfoo = { 0x01, 0x02, 0x03, 0x04 };
   final byte[] ba = { 0x0A };
@@ -17,6 +23,10 @@ public class TupleSortedSetTest extends JedisCommandsTestBase {
   final byte[] bd = { 0x0D };
   final byte[] be = { 0x0E };
   final byte[] bf = { 0x0F };
+
+  public TupleSortedSetTest(RedisProtocol protocol) {
+    super(protocol);
+  }
 
   @Test
   public void testBinary() {

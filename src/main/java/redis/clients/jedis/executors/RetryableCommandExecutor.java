@@ -5,13 +5,15 @@ import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import redis.clients.jedis.CommandObject;
 import redis.clients.jedis.Connection;
-
+import redis.clients.jedis.annots.VisibleForTesting;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.util.IOUtils;
 import redis.clients.jedis.providers.ConnectionProvider;
+import redis.clients.jedis.util.JedisAsserts;
 
 public class RetryableCommandExecutor implements CommandExecutor {
 
@@ -23,6 +25,10 @@ public class RetryableCommandExecutor implements CommandExecutor {
 
   public RetryableCommandExecutor(ConnectionProvider provider, int maxAttempts,
       Duration maxTotalRetriesDuration) {
+    JedisAsserts.notNull(provider, "provider must not be null");
+    JedisAsserts.isTrue(maxAttempts > 0, "maxAttempts must be greater than 0");
+    JedisAsserts.notNull(maxTotalRetriesDuration, "maxTotalRetriesDuration must not be null");
+
     this.provider = provider;
     this.maxAttempts = maxAttempts;
     this.maxTotalRetriesDuration = maxTotalRetriesDuration;
@@ -45,7 +51,7 @@ public class RetryableCommandExecutor implements CommandExecutor {
       try {
         connection = provider.getConnection(commandObject.getArguments());
 
-        return connection.executeCommand(commandObject);
+        return execute(connection, commandObject);
 
       } catch (JedisConnectionException jce) {
         lastException = jce;
@@ -62,13 +68,24 @@ public class RetryableCommandExecutor implements CommandExecutor {
         }
       }
       if (Instant.now().isAfter(deadline)) {
-        throw new JedisException("Cluster retry deadline exceeded.");
+        throw new JedisException("Retry deadline exceeded.");
       }
     }
 
-    JedisException maxAttemptsException = new JedisException("No more cluster attempts left.");
-    maxAttemptsException.addSuppressed(lastException);
+    JedisException maxAttemptsException = new JedisException("No more attempts left.");
+    if (lastException != null) {
+      maxAttemptsException.addSuppressed(lastException);
+    }
     throw maxAttemptsException;
+  }
+
+  /**
+   * WARNING: This method is accessible for the purpose of testing.
+   * This should not be used or overriden.
+   */
+  @VisibleForTesting
+  protected <T> T execute(Connection connection, CommandObject<T> commandObject) {
+    return connection.executeCommand(commandObject);
   }
 
   /**
@@ -97,12 +114,17 @@ public class RetryableCommandExecutor implements CommandExecutor {
 
     long millisLeft = Duration.between(Instant.now(), deadline).toMillis();
     if (millisLeft < 0) {
-      throw new JedisException("Cluster retry deadline exceeded.");
+      throw new JedisException("Retry deadline exceeded.");
     }
 
     return millisLeft / (attemptsLeft * (attemptsLeft + 1));
   }
 
+  /**
+   * WARNING: This method is accessible for the purpose of testing.
+   * This should not be used or overriden.
+   */
+  @VisibleForTesting
   protected void sleep(long sleepMillis) {
     try {
       TimeUnit.MILLISECONDS.sleep(sleepMillis);

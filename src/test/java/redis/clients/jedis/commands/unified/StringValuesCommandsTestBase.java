@@ -1,23 +1,43 @@
 package redis.clients.jedis.commands.unified;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assume.assumeFalse;
-import static redis.clients.jedis.util.RedisVersionUtil.checkRedisMajorVersionNumber;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static redis.clients.jedis.params.SetParams.setParams;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
-import org.junit.Test;
+import io.redis.test.annotations.ConditionalOnEnv;
+import io.redis.test.annotations.EnabledOnCommand;
+import io.redis.test.annotations.SinceRedisVersion;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import redis.clients.jedis.RedisProtocol;
+import redis.clients.jedis.params.LCSParams;
+import redis.clients.jedis.params.MSetExParams;
 
 import redis.clients.jedis.resps.LCSMatchResult;
-import redis.clients.jedis.resps.LCSMatchResult.MatchedPosition;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.params.GetExParams;
-import redis.clients.jedis.params.StrAlgoLCSParams;
+import redis.clients.jedis.params.IncrexFloatParams;
+import redis.clients.jedis.params.IncrexParams;
+import redis.clients.jedis.util.TestEnvUtil;
 
+@Tag("integration")
 public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsTestBase {
+
+  public StringValuesCommandsTestBase(RedisProtocol protocol) {
+    super(protocol);
+  }
+
   @Test
   public void setAndGet() {
     String status = jedis.set("foo", "bar");
@@ -35,6 +55,19 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
     assertNull(value);
     value = jedis.get("foo");
     assertEquals("bar", value);
+  }
+
+  @Test
+  public void setGetWithParams() {
+    jedis.del("foo");
+
+    // no previous, return null
+    assertNull(jedis.setGet("foo", "bar", setParams().nx()));
+
+    // key already exists, new value should not be set, previous value should be bbar
+    assertEquals("bar", jedis.setGet("foo", "foobar", setParams().nx()));
+
+    assertEquals("bar", jedis.setGet("foo", "foobar", setParams().xx()));
   }
 
   @Test
@@ -57,15 +90,17 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
     long ttl = jedis.ttl("foo");
     assertTrue(ttl > 0 && ttl <= 10);
 
-    assertEquals("bar", jedis.getEx("foo", GetExParams.getExParams().px(20000l)));
+    assertEquals("bar", jedis.getEx("foo", GetExParams.getExParams().px(20000L)));
     ttl = jedis.ttl("foo");
     assertTrue(ttl > 10 && ttl <= 20);
 
-    assertEquals("bar", jedis.getEx("foo", GetExParams.getExParams().exAt(System.currentTimeMillis() / 1000 + 30)));
+    assertEquals("bar",
+      jedis.getEx("foo", GetExParams.getExParams().exAt(System.currentTimeMillis() / 1000 + 30)));
     ttl = jedis.ttl("foo");
     assertTrue(ttl > 20 && ttl <= 30);
 
-    assertEquals("bar", jedis.getEx("foo", GetExParams.getExParams().pxAt(System.currentTimeMillis() + 40000l)));
+    assertEquals("bar",
+      jedis.getEx("foo", GetExParams.getExParams().pxAt(System.currentTimeMillis() + 40000L)));
     ttl = jedis.ttl("foo");
     assertTrue(ttl > 30 && ttl <= 40);
 
@@ -127,6 +162,7 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void msetnx() {
     assertEquals(1, jedis.msetnx("foo", "bar", "bar", "foo"));
     assertEquals("bar", jedis.get("foo"));
@@ -143,10 +179,10 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
     assertEquals(2, jedis.incr("foo"));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void incrWrongValue() {
     jedis.set("foo", "bar");
-    jedis.incr("foo");
+    assertThrows(JedisDataException.class, () -> jedis.incr("foo"));
   }
 
   @Test
@@ -155,10 +191,10 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
     assertEquals(5, jedis.incrBy("foo", 3));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void incrByWrongValue() {
     jedis.set("foo", "bar");
-    jedis.incrBy("foo", 2);
+    assertThrows(JedisDataException.class, () -> jedis.incrBy("foo", 2));
   }
 
   @Test
@@ -167,16 +203,16 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
     assertEquals(10.6, jedis.incrByFloat("foo", 0.1), 0.0);
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void incrByFloatWrongValue() {
     jedis.set("foo", "bar");
-    jedis.incrByFloat("foo", 2d);
+    assertThrows(JedisDataException.class, () -> jedis.incrByFloat("foo", 2d));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void decrWrongValue() {
     jedis.set("foo", "bar");
-    jedis.decr("foo");
+    assertThrows(JedisDataException.class, () -> jedis.decr("foo"));
   }
 
   @Test
@@ -191,10 +227,10 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
     assertEquals(-4, jedis.decrBy("foo", 2));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void decrByWrongValue() {
     jedis.set("foo", "bar");
-    jedis.decrBy("foo", 2);
+    assertThrows(JedisDataException.class, () -> jedis.decrBy("foo", 2));
   }
 
   @Test
@@ -206,6 +242,7 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void substr() {
     jedis.set("s", "This is a string");
     assertEquals("This", jedis.substr("s", 0, 3));
@@ -227,10 +264,10 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
     assertEquals(1L + Integer.MAX_VALUE, jedis.incrBy("foo", Integer.MAX_VALUE));
   }
 
-  @Test(expected = JedisDataException.class)
+  @Test
   public void incrReallyLargeNumbers() {
     jedis.set("foo", Long.toString(Long.MAX_VALUE));
-    jedis.incr("foo"); // Should throw an exception 
+    assertThrows(JedisDataException.class, () -> jedis.incr("foo")); // Should throw an exception
   }
 
   @Test
@@ -242,77 +279,228 @@ public abstract class StringValuesCommandsTestBase extends UnifiedJedisCommandsT
   }
 
   @Test
-  public void strAlgoLcsWithLen() {
-    assumeFalse(checkRedisMajorVersionNumber(7));
-    LCSMatchResult stringMatchResult = jedis.strAlgoLCSStrings("ohmytext", "mynewtext",
-        StrAlgoLCSParams.StrAlgoLCSParams().len());
-    assertEquals(stringMatchResult.getLen(), 6);
-  }
-
-  @Test
-  public void strAlgoLcs() {
-    assumeFalse(checkRedisMajorVersionNumber(7));
-    LCSMatchResult stringMatchResult = jedis.strAlgoLCSStrings("ohmytext", "mynewtext",
-        StrAlgoLCSParams.StrAlgoLCSParams());
-    assertEquals(stringMatchResult.getMatchString(), "mytext");
-  }
-
-  @Test
-  public void strAlgoLcsWithIdx() {
-    assumeFalse(checkRedisMajorVersionNumber(7));
-    LCSMatchResult stringMatchResult = jedis.strAlgoLCSStrings("ohmytext", "mynewtext",
-        StrAlgoLCSParams.StrAlgoLCSParams().idx().withMatchLen());
-    assertEquals(stringMatchResult.getLen(), 6);
-    assertEquals(2, stringMatchResult.getMatches().size());
-
-    MatchedPosition position0 = stringMatchResult.getMatches().get(0);
-    assertEquals(position0.getA().getStart(), 4);
-    assertEquals(position0.getA().getEnd(), 7);
-    assertEquals(position0.getB().getStart(), 5);
-    assertEquals(position0.getB().getEnd(), 8);
-    assertEquals(position0.getMatchLen(), 4);
-
-    MatchedPosition position1 = stringMatchResult.getMatches().get(1);
-    assertEquals(position1.getA().getStart(), 2);
-    assertEquals(position1.getA().getEnd(), 3);
-    assertEquals(position1.getB().getStart(), 0);
-    assertEquals(position1.getB().getEnd(), 1);
-    assertEquals(position1.getMatchLen(), 2);
-  }
-
-  @Test
-  public void strAlgoLcsWithKey() {
-    assumeFalse(checkRedisMajorVersionNumber(7));
+  @SinceRedisVersion(value = "7.0.0")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void lcs() {
     jedis.mset("key1", "ohmytext", "key2", "mynewtext");
 
-    LCSMatchResult stringMatchResult = jedis.strAlgoLCSKeys("key1", "key2",
-        StrAlgoLCSParams.StrAlgoLCSParams());
+    LCSMatchResult stringMatchResult = jedis.lcs("key1", "key2", LCSParams.LCSParams());
     assertEquals("mytext", stringMatchResult.getMatchString());
-  }
 
-  @Test
-  public void strAlgoLcsWithKeyAndIdx() {
-    assumeFalse(checkRedisMajorVersionNumber(7));
-    jedis.mset("key1", "ohmytext", "key2", "mynewtext");
-
-    LCSMatchResult stringMatchResult = jedis.strAlgoLCSKeys( "key1", "key2",
-        StrAlgoLCSParams.StrAlgoLCSParams().idx().withMatchLen());
+    stringMatchResult = jedis.lcs("key1", "key2", LCSParams.LCSParams().idx().withMatchLen());
     assertEquals(stringMatchResult.getLen(), 6);
     assertEquals(2, stringMatchResult.getMatches().size());
 
-    MatchedPosition position0 = stringMatchResult.getMatches().get(0);
-    assertEquals(position0.getA().getStart(), 4);
-    assertEquals(position0.getA().getEnd(), 7);
-    assertEquals(position0.getB().getStart(), 5);
-    assertEquals(position0.getB().getEnd(), 8);
-    assertEquals(position0.getMatchLen(), 4);
-
-    MatchedPosition position1 = stringMatchResult.getMatches().get(1);
-    assertEquals(position1.getA().getStart(), 2);
-    assertEquals(position1.getA().getEnd(), 3);
-    assertEquals(position1.getB().getStart(), 0);
-    assertEquals(position1.getB().getEnd(), 1);
-    assertEquals(position1.getMatchLen(), 2);
+    stringMatchResult = jedis.lcs("key1", "key2", LCSParams.LCSParams().idx().minMatchLen(10));
+    assertEquals(0, stringMatchResult.getMatches().size());
   }
 
+  // MSETEX NX + expiration matrix
+  static Stream<Arguments> msetexNxArgsProvider() {
+    return Stream.of(msetexCase("EX", () -> new MSetExParams().nx().ex(5)),
+      msetexCase("PX", () -> new MSetExParams().nx().px(5000)),
+      msetexCase("EXAT",
+        () -> new MSetExParams().nx().exAt(System.currentTimeMillis() / 1000 + 60)),
+      msetexCase("PXAT", () -> new MSetExParams().nx().pxAt(System.currentTimeMillis() + 60_000)),
+      msetexCase("KEEPTTL", () -> new MSetExParams().nx().keepTtl()));
+  }
+
+  // Built per invocation so absolute EXAT/PXAT aren't stale by the time later cases run.
+  private static Arguments msetexCase(String label, Supplier<MSetExParams> params) {
+    return Arguments.of(label, params);
+  }
+
+  @ParameterizedTest(name = "MSETEX NX + {0}")
+  @MethodSource("msetexNxArgsProvider")
+  @EnabledOnCommand("MSETEX")
+  public void msetexNx_parametrized(String optionLabel, Supplier<MSetExParams> params) {
+    String k1 = "{t}msetex:unified:k1";
+    String k2 = "{t}msetex:unified:k2";
+
+    boolean result = jedis.msetex(params.get(), k1, "v1", k2, "v2");
+    assertTrue(result);
+
+    long ttl = jedis.ttl(k1);
+    if ("KEEPTTL".equals(optionLabel)) {
+      assertEquals(-1L, ttl);
+    } else {
+      assertTrue(ttl > 0L);
+    }
+  }
+
+  @Test
+  @EnabledOnCommand("MSETEX")
+  public void msetexXxExAt() {
+    String k1 = "{t}msetex:unified:xx:k1";
+    String k2 = "{t}msetex:unified:xx:k2";
+
+    // First set the keys so they exist (XX requires existing keys)
+    jedis.set(k1, "initial1");
+    jedis.set(k2, "initial2");
+
+    // Now use MSETEX with XX and EXAT
+    long expiryTimestamp = System.currentTimeMillis() / 1000 + 5;
+    MSetExParams params = new MSetExParams().xx().exAt(expiryTimestamp);
+    boolean result = jedis.msetex(params, k1, "v1", k2, "v2");
+    assertTrue(result);
+
+    // Verify values were updated
+    assertEquals("v1", jedis.get(k1));
+    assertEquals("v2", jedis.get(k2));
+
+    // Verify TTL is set
+    long ttl = jedis.ttl(k1);
+    assertTrue(ttl > 0L);
+  }
+
+  // ── INCREX ──────────────────────────────────────────
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxBasic() {
+    List<Long> res = jedis.increx("foo");
+    assertEquals(Long.valueOf(1), res.get(0));
+    assertEquals(Long.valueOf(1), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxByIntWithBoundsAndExpiry() {
+    jedis.set("foo", "10");
+    IncrexParams params = new IncrexParams().lbound(0).ubound(20).ex(60);
+    List<Long> res = jedis.increx("foo", 2, params);
+    assertEquals(Long.valueOf(12), res.get(0));
+    assertEquals(Long.valueOf(2), res.get(1));
+    assertTrue(jedis.ttl("foo") > 0);
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxByFloatWithBoundsAndExpiry() {
+    jedis.set("foo", "3.25");
+    IncrexFloatParams params = new IncrexFloatParams().lbound(-1.5).ubound(9.5).ex(60);
+    List<Double> res = jedis.increx("foo", 1.25, params);
+    assertEquals(4.5, res.get(0), 0.0);
+    assertEquals(1.25, res.get(1), 0.0);
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxNegativeIncrement() {
+    jedis.set("foo", "10");
+    IncrexParams params = new IncrexParams();
+    List<Long> res = jedis.increx("foo", -3, params);
+    assertEquals(Long.valueOf(7), res.get(0));
+    assertEquals(Long.valueOf(-3), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxDefaultRejectSilent() {
+    jedis.set("foo", "0");
+    IncrexParams params = new IncrexParams().ubound(5);
+    List<Long> res = jedis.increx("foo", 10, params);
+    assertEquals(Long.valueOf(0), res.get(0));
+    assertEquals(Long.valueOf(0), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxSaturateUbound() {
+    jedis.set("foo", "0");
+    IncrexParams params = new IncrexParams().ubound(5).saturate();
+    List<Long> res = jedis.increx("foo", 10, params);
+    assertEquals(Long.valueOf(5), res.get(0));
+    assertEquals(Long.valueOf(5), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxSaturateLbound() {
+    jedis.set("foo", "5");
+    IncrexParams params = new IncrexParams().lbound(0).saturate();
+    List<Long> res = jedis.increx("foo", -100, params);
+    assertEquals(Long.valueOf(0), res.get(0));
+    assertEquals(Long.valueOf(-5), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxSaturateStillAppliesExpiry() {
+    jedis.set("foo", "5");
+    IncrexParams params = new IncrexParams().ubound(5).saturate().ex(60);
+    List<Long> res = jedis.increx("foo", 1, params);
+    assertEquals(Long.valueOf(5), res.get(0));
+    assertEquals(Long.valueOf(0), res.get(1));
+    assertTrue(jedis.ttl("foo") > 0);
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxPersist() {
+    jedis.set("foo", "5");
+    jedis.expire("foo", 300);
+    IncrexParams params = new IncrexParams().persist();
+    List<Long> res = jedis.increx("foo", 2, params);
+    assertEquals(Long.valueOf(7), res.get(0));
+    assertEquals(Long.valueOf(2), res.get(1));
+    assertEquals(-1, jedis.ttl("foo"));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxEnxNoExistingTtl() {
+    jedis.set("foo", "5");
+    IncrexParams params = new IncrexParams().ex(60).enx();
+    List<Long> res = jedis.increx("foo", 1, params);
+    assertEquals(Long.valueOf(6), res.get(0));
+    assertTrue(jedis.ttl("foo") > 0);
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxEnxWithExistingTtl() {
+    jedis.set("foo", "5");
+    jedis.expire("foo", 300);
+    long ttlBefore = jedis.ttl("foo");
+    IncrexParams params = new IncrexParams().ex(60).enx();
+    jedis.increx("foo", 1, params);
+    long ttlAfter = jedis.ttl("foo");
+    assertTrue(ttlAfter > 60, "ENX should preserve existing TTL");
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxNonExistentKey() {
+    IncrexParams params = new IncrexParams();
+    List<Long> res = jedis.increx("foo", 5, params);
+    assertEquals(Long.valueOf(5), res.get(0));
+    assertEquals(Long.valueOf(5), res.get(1));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxNonNumericKey() {
+    jedis.set("foo", "hello");
+    IncrexParams params = new IncrexParams();
+    assertThrows(JedisDataException.class, () -> jedis.increx("foo", 1, params));
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxSaturateFloat() {
+    jedis.set("foo", "0.0");
+    IncrexFloatParams params = new IncrexFloatParams().ubound(5.0).saturate();
+    List<Double> res = jedis.increx("foo", 10.0, params);
+    assertEquals(5.0, res.get(0), 0.0);
+    assertEquals(5.0, res.get(1), 0.0);
+  }
+
+  @Test
+  @EnabledOnCommand("INCREX")
+  public void increxFloatThenIntFails() {
+    jedis.set("foo", "1.5");
+    IncrexParams params = new IncrexParams();
+    assertThrows(JedisDataException.class, () -> jedis.increx("foo", 1, params));
+  }
 }

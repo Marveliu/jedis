@@ -1,44 +1,79 @@
 package redis.clients.jedis;
 
-import java.util.Objects;
+import java.net.URI;
+import java.util.function.Supplier;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocketFactory;
 
+import redis.clients.jedis.authentication.AuthXManager;
+import redis.clients.jedis.json.JsonObjectMapper;
+import redis.clients.jedis.search.SearchProtocol;
+import redis.clients.jedis.util.JedisAsserts;
+import redis.clients.jedis.util.JedisURIHelper;
+
 public final class DefaultJedisClientConfig implements JedisClientConfig {
+
+  private final RedisProtocol redisProtocol;
+  private final boolean autoNegotiateProtocol;
 
   private final int connectionTimeoutMillis;
   private final int socketTimeoutMillis;
   private final int blockingSocketTimeoutMillis;
 
-  private final String user;
-  private volatile String password;
+  private volatile Supplier<RedisCredentials> credentialsProvider;
   private final int database;
   private final String clientName;
 
   private final boolean ssl;
   private final SSLSocketFactory sslSocketFactory;
   private final SSLParameters sslParameters;
+  private final SslOptions sslOptions;
   private final HostnameVerifier hostnameVerifier;
 
   private final HostAndPortMapper hostAndPortMapper;
 
-  private DefaultJedisClientConfig(int connectionTimeoutMillis, int soTimeoutMillis,
-      int blockingSocketTimeoutMillis, String user, String password, int database, String clientName,
-      boolean ssl, SSLSocketFactory sslSocketFactory, SSLParameters sslParameters,
-      HostnameVerifier hostnameVerifier, HostAndPortMapper hostAndPortMapper) {
-    this.connectionTimeoutMillis = connectionTimeoutMillis;
-    this.socketTimeoutMillis = soTimeoutMillis;
-    this.blockingSocketTimeoutMillis = blockingSocketTimeoutMillis;
-    this.user = user;
-    this.password = password;
-    this.database = database;
-    this.clientName = clientName;
-    this.ssl = ssl;
-    this.sslSocketFactory = sslSocketFactory;
-    this.sslParameters = sslParameters;
-    this.hostnameVerifier = hostnameVerifier;
-    this.hostAndPortMapper = hostAndPortMapper;
+  private final ClientSetInfoConfig clientSetInfoConfig;
+
+  private final boolean readOnlyForRedisClusterReplicas;
+
+  private final AuthXManager authXManager;
+
+  private final CommandKeyArgumentPreProcessor commandKeyArgumentPreProcessor;
+  private final JsonObjectMapper jsonObjectMapper;
+  private final int searchDialect;
+
+  private DefaultJedisClientConfig(DefaultJedisClientConfig.Builder builder) {
+    this.redisProtocol = builder.redisProtocol;
+    this.autoNegotiateProtocol = builder.autoNegotiateProtocol;
+    this.connectionTimeoutMillis = builder.connectionTimeoutMillis;
+    this.socketTimeoutMillis = builder.socketTimeoutMillis;
+    this.blockingSocketTimeoutMillis = builder.blockingSocketTimeoutMillis;
+    this.credentialsProvider = builder.credentialsProvider;
+    this.database = builder.database;
+    this.clientName = builder.clientName;
+    this.ssl = builder.ssl;
+    this.sslSocketFactory = builder.sslSocketFactory;
+    this.sslParameters = builder.sslParameters;
+    this.sslOptions = builder.sslOptions;
+    this.hostnameVerifier = builder.hostnameVerifier;
+    this.hostAndPortMapper = builder.hostAndPortMapper;
+    this.clientSetInfoConfig = builder.clientSetInfoConfig;
+    this.readOnlyForRedisClusterReplicas = builder.readOnlyForRedisClusterReplicas;
+    this.authXManager = builder.authXManager;
+    this.commandKeyArgumentPreProcessor = builder.commandKeyArgumentPreProcessor;
+    this.jsonObjectMapper = builder.jsonObjectMapper;
+    this.searchDialect = builder.searchDialect;
+  }
+
+  @Override
+  public RedisProtocol getRedisProtocol() {
+    return redisProtocol;
+  }
+
+  @Override
+  public boolean isAutoNegotiateProtocol() {
+    return autoNegotiateProtocol;
   }
 
   @Override
@@ -58,19 +93,23 @@ public final class DefaultJedisClientConfig implements JedisClientConfig {
 
   @Override
   public String getUser() {
-    return user;
+    return credentialsProvider.get().getUser();
   }
 
   @Override
   public String getPassword() {
-    return password;
+    char[] password = credentialsProvider.get().getPassword();
+    return password == null ? null : new String(password);
   }
 
   @Override
-  public synchronized void updatePassword(String password) {
-    if (!Objects.equals(this.password, password)) {
-      this.password = password;
-    }
+  public Supplier<RedisCredentials> getCredentialsProvider() {
+    return credentialsProvider;
+  }
+
+  @Override
+  public AuthXManager getAuthXManager() {
+    return authXManager;
   }
 
   @Override
@@ -88,14 +127,27 @@ public final class DefaultJedisClientConfig implements JedisClientConfig {
     return ssl;
   }
 
+  /**
+   * @deprecated since 7.4.2, use {@link #getSslOptions()} instead.
+   */
+  @Deprecated
   @Override
   public SSLSocketFactory getSslSocketFactory() {
     return sslSocketFactory;
   }
 
+  /**
+   * @deprecated since 7.4.2, use {@link #getSslOptions()} instead.
+   */
+  @Deprecated
   @Override
   public SSLParameters getSslParameters() {
     return sslParameters;
+  }
+
+  @Override
+  public SslOptions getSslOptions() {
+    return sslOptions;
   }
 
   @Override
@@ -108,11 +160,89 @@ public final class DefaultJedisClientConfig implements JedisClientConfig {
     return hostAndPortMapper;
   }
 
+  @Override
+  public ClientSetInfoConfig getClientSetInfoConfig() {
+    return clientSetInfoConfig;
+  }
+
+  @Override
+  public boolean isReadOnlyForRedisClusterReplicas() {
+    return readOnlyForRedisClusterReplicas;
+  }
+
+  @Override
+  public CommandKeyArgumentPreProcessor getCommandKeyArgumentPreProcessor() {
+    return commandKeyArgumentPreProcessor;
+  }
+
+  @Override
+  public JsonObjectMapper getJsonObjectMapper() {
+    return jsonObjectMapper;
+  }
+
+  @Override
+  public int getSearchDialect() {
+    return searchDialect;
+  }
+
   public static Builder builder() {
     return new Builder();
   }
 
+  /**
+   * Creates a new Builder pre-initialized with settings from the provided Redis URI.
+   * <p>
+   * The URI format is:
+   * {@code redis[s]://[username:password@]host:port[/database][?protocol=version]}
+   * </p>
+   * <p>
+   * Settings extracted from URI:
+   * <ul>
+   * <li>Credentials (username/password) if present in URI</li>
+   * <li>Database index if specified in path</li>
+   * <li>SSL enabled if scheme is "rediss"</li>
+   * <li>Protocol version if specified in query parameters</li>
+   * </ul>
+   * @param redisUri the Redis URI to extract settings from
+   * @return a new Builder pre-initialized from the URI
+   */
+  public static Builder builder(URI redisUri) {
+    JedisAsserts.notNull(redisUri, "Redis URI must not be null");
+    JedisAsserts.isTrue(JedisURIHelper.isValid(redisUri), "Invalid Redis URI");
+
+    Builder builder = new Builder();
+
+    // Extract and apply credentials if present
+    String uriUser = JedisURIHelper.getUser(redisUri);
+    String uriPassword = JedisURIHelper.getPassword(redisUri);
+
+    if (uriUser != null || uriPassword != null) {
+      builder.credentials(new DefaultRedisCredentials(uriUser, uriPassword));
+    }
+
+    if (JedisURIHelper.hasDbIndex(redisUri)) {
+      builder.database(JedisURIHelper.getDBIndex(redisUri));
+    }
+
+    // Apply protocol if specified
+    RedisProtocol uriProtocol = JedisURIHelper.getRedisProtocol(redisUri);
+    if (uriProtocol != null) {
+      builder.protocol(uriProtocol);
+    }
+
+    if (JedisURIHelper.isRedisSSLScheme(redisUri)) {
+      builder.ssl(true);
+    } else if (JedisURIHelper.isRedisScheme(redisUri)) {
+      builder.ssl(false);
+    }
+
+    return builder;
+  }
+
   public static class Builder {
+
+    private RedisProtocol redisProtocol = null;
+    private boolean autoNegotiateProtocol = true;
 
     private int connectionTimeoutMillis = Protocol.DEFAULT_TIMEOUT;
     private int socketTimeoutMillis = Protocol.DEFAULT_TIMEOUT;
@@ -120,23 +250,86 @@ public final class DefaultJedisClientConfig implements JedisClientConfig {
 
     private String user = null;
     private String password = null;
+    private Supplier<RedisCredentials> credentialsProvider;
     private int database = Protocol.DEFAULT_DATABASE;
     private String clientName = null;
 
     private boolean ssl = false;
     private SSLSocketFactory sslSocketFactory = null;
     private SSLParameters sslParameters = null;
+    private SslOptions sslOptions = null;
     private HostnameVerifier hostnameVerifier = null;
 
     private HostAndPortMapper hostAndPortMapper = null;
+
+    private ClientSetInfoConfig clientSetInfoConfig = ClientSetInfoConfig.DEFAULT;
+
+    private boolean readOnlyForRedisClusterReplicas = false;
+
+    private AuthXManager authXManager = null;
+
+    private CommandKeyArgumentPreProcessor commandKeyArgumentPreProcessor = null;
+    private JsonObjectMapper jsonObjectMapper = null;
+    private int searchDialect = SearchProtocol.DEFAULT_DIALECT;
 
     private Builder() {
     }
 
     public DefaultJedisClientConfig build() {
-      return new DefaultJedisClientConfig(connectionTimeoutMillis, socketTimeoutMillis,
-          blockingSocketTimeoutMillis, user, password, database, clientName, ssl, sslSocketFactory,
-          sslParameters, hostnameVerifier, hostAndPortMapper);
+      if (credentialsProvider == null) {
+        credentialsProvider = new DefaultRedisCredentialsProvider(
+            new DefaultRedisCredentials(user, password));
+      }
+
+      return new DefaultJedisClientConfig(this);
+    }
+
+    /**
+     * Shortcut to
+     * {@link redis.clients.jedis.DefaultJedisClientConfig.Builder#protocol(RedisProtocol)} with
+     * {@link RedisProtocol#RESP3}.
+     * @return this
+     */
+    public Builder resp3() {
+      return protocol(RedisProtocol.RESP3);
+    }
+
+    /**
+     * Shortcut to
+     * {@link redis.clients.jedis.DefaultJedisClientConfig.Builder#protocol(RedisProtocol)} with
+     * {@link RedisProtocol#RESP2}.
+     * @return this
+     */
+    public Builder resp2() {
+      return protocol(RedisProtocol.RESP2);
+    }
+
+    /**
+     * Shortcut for the legacy "no HELLO" mode: sets {@code protocol(null)} and disables
+     * auto-negotiation so the connection skips the {@code HELLO} handshake entirely and assumes
+     * RESP2 on the wire.
+     * @return this
+     */
+    public Builder serverDefaultProtocol() {
+      return protocol(null).autoNegotiateProtocol(false);
+    }
+
+    public Builder protocol(RedisProtocol protocol) {
+      this.redisProtocol = protocol;
+      return this;
+    }
+
+    /**
+     * When the {@linkplain #protocol(RedisProtocol) protocol} is left as {@code null}, controls
+     * whether the connection attempts {@code HELLO 3} with graceful RESP2 fallback (when
+     * {@code true}, the default) or skips {@code HELLO} altogether (when {@code false}, the legacy
+     * behaviour).
+     * @param autoNegotiateProtocol whether to auto-negotiate the protocol on connect
+     * @return this
+     */
+    public Builder autoNegotiateProtocol(boolean autoNegotiateProtocol) {
+      this.autoNegotiateProtocol = autoNegotiateProtocol;
+      return this;
     }
 
     public Builder timeoutMillis(int timeoutMillis) {
@@ -170,6 +363,16 @@ public final class DefaultJedisClientConfig implements JedisClientConfig {
       return this;
     }
 
+    public Builder credentials(RedisCredentials credentials) {
+      this.credentialsProvider = new DefaultRedisCredentialsProvider(credentials);
+      return this;
+    }
+
+    public Builder credentialsProvider(Supplier<RedisCredentials> credentials) {
+      this.credentialsProvider = credentials;
+      return this;
+    }
+
     public Builder database(int database) {
       this.database = database;
       return this;
@@ -180,18 +383,52 @@ public final class DefaultJedisClientConfig implements JedisClientConfig {
       return this;
     }
 
+    /**
+     * Enable TLS/SSL for connections.
+     * <p>
+     * TLS is enabled when either {@code ssl(true)} or {@link #sslOptions(SslOptions)} is set.
+     * {@link #sslOptions(SslOptions)} takes precedence; otherwise TLS uses
+     * {@link #sslSocketFactory(SSLSocketFactory)} and {@link #sslParameters(SSLParameters)}.
+     * @param ssl {@code true} to enable TLS/SSL
+     * @return {@code this}
+     * @deprecated since 7.4.2, use {@link #sslOptions(SslOptions)} instead. For TLS with JVM
+     *             defaults use {@code sslOptions(SslOptions.defaults())}.
+     */
+    @Deprecated
     public Builder ssl(boolean ssl) {
       this.ssl = ssl;
       return this;
     }
 
+    /**
+     * @deprecated since 7.4.2, use {@link #sslOptions(SslOptions)} instead.
+     */
+    @Deprecated
     public Builder sslSocketFactory(SSLSocketFactory sslSocketFactory) {
       this.sslSocketFactory = sslSocketFactory;
       return this;
     }
 
+    /**
+     * @deprecated since 7.4.2, use {@link #sslOptions(SslOptions)} instead.
+     */
+    @Deprecated
     public Builder sslParameters(SSLParameters sslParameters) {
       this.sslParameters = sslParameters;
+      return this;
+    }
+
+    /**
+     * Recommended way to configure TLS/SSL connections.
+     * <p>
+     * When set, TLS is enabled and {@link #sslSocketFactory(SSLSocketFactory)} /
+     * {@link #sslParameters(SSLParameters)} are ignored.
+     * @param sslOptions TLS configuration
+     * @return {@code this}
+     * @see SslOptions
+     */
+    public Builder sslOptions(SslOptions sslOptions) {
+      this.sslOptions = sslOptions;
       return this;
     }
 
@@ -204,22 +441,155 @@ public final class DefaultJedisClientConfig implements JedisClientConfig {
       this.hostAndPortMapper = hostAndPortMapper;
       return this;
     }
+
+    public Builder clientSetInfoConfig(ClientSetInfoConfig setInfoConfig) {
+      this.clientSetInfoConfig = setInfoConfig;
+      return this;
+    }
+
+    public Builder readOnlyForRedisClusterReplicas() {
+      this.readOnlyForRedisClusterReplicas = true;
+      return this;
+    }
+
+    public Builder authXManager(AuthXManager authXManager) {
+      this.authXManager = authXManager;
+      return this;
+    }
+
+    /**
+     * Sets a key argument pre-processor applied to every command before it is sent. Useful for
+     * implementing key prefixing or other key rewriting strategies.
+     * <p>
+     * <b>Not honored by the legacy {@link Jedis} class</b> — only the {@link UnifiedJedis} family
+     * reads this value when constructing its command pipeline.
+     * @param commandKeyArgumentPreProcessor the pre-processor (or {@code null} to disable)
+     * @return this
+     */
+    public Builder commandKeyArgumentPreProcessor(
+        CommandKeyArgumentPreProcessor commandKeyArgumentPreProcessor) {
+      this.commandKeyArgumentPreProcessor = commandKeyArgumentPreProcessor;
+      return this;
+    }
+
+    /**
+     * Sets a custom JSON object mapper used by RedisJSON commands. When unset, the default
+     * Gson-based mapper is used.
+     * <p>
+     * <b>Not honored by the legacy {@link Jedis} class</b> — only the {@link UnifiedJedis} family
+     * reads this value when constructing its command pipeline.
+     * @param jsonObjectMapper the mapper (or {@code null} to fall back to the default)
+     * @return this
+     */
+    public Builder jsonObjectMapper(JsonObjectMapper jsonObjectMapper) {
+      this.jsonObjectMapper = jsonObjectMapper;
+      return this;
+    }
+
+    /**
+     * Sets the default search dialect for RediSearch commands. Defaults to
+     * {@link SearchProtocol#DEFAULT_DIALECT}.
+     * <p>
+     * <b>Not honored by the legacy {@link Jedis} class</b> — only the {@link UnifiedJedis} family
+     * reads this value when constructing its command pipeline.
+     * @param searchDialect the dialect version (must not be 0)
+     * @return this
+     * @throws IllegalArgumentException if {@code searchDialect == 0}
+     */
+    public Builder searchDialect(int searchDialect) {
+      if (searchDialect == 0) {
+        throw new IllegalArgumentException("DIALECT=0 cannot be set.");
+      }
+      this.searchDialect = searchDialect;
+      return this;
+    }
+
+    public Builder from(JedisClientConfig instance) {
+      this.redisProtocol = instance.getRedisProtocol();
+      this.autoNegotiateProtocol = instance.isAutoNegotiateProtocol();
+      this.connectionTimeoutMillis = instance.getConnectionTimeoutMillis();
+      this.socketTimeoutMillis = instance.getSocketTimeoutMillis();
+      this.blockingSocketTimeoutMillis = instance.getBlockingSocketTimeoutMillis();
+      this.credentialsProvider = instance.getCredentialsProvider();
+      this.database = instance.getDatabase();
+      this.clientName = instance.getClientName();
+      this.ssl = instance.isSsl();
+      this.sslSocketFactory = instance.getSslSocketFactory();
+      this.sslParameters = instance.getSslParameters();
+      this.sslOptions = instance.getSslOptions();
+      this.hostnameVerifier = instance.getHostnameVerifier();
+      this.hostAndPortMapper = instance.getHostAndPortMapper();
+      this.clientSetInfoConfig = instance.getClientSetInfoConfig();
+      this.readOnlyForRedisClusterReplicas = instance.isReadOnlyForRedisClusterReplicas();
+      this.authXManager = instance.getAuthXManager();
+      this.commandKeyArgumentPreProcessor = instance.getCommandKeyArgumentPreProcessor();
+      this.jsonObjectMapper = instance.getJsonObjectMapper();
+      this.searchDialect = instance.getSearchDialect();
+      return this;
+    }
   }
 
+  /**
+   * @deprecated Use {@link redis.clients.jedis.DefaultJedisClientConfig.Builder}.
+   */
+  @Deprecated
   public static DefaultJedisClientConfig create(int connectionTimeoutMillis, int soTimeoutMillis,
-      int blockingSocketTimeoutMillis, String user, String password, int database, String clientName,
-      boolean ssl, SSLSocketFactory sslSocketFactory, SSLParameters sslParameters,
-      HostnameVerifier hostnameVerifier, HostAndPortMapper hostAndPortMapper) {
-    return new DefaultJedisClientConfig(connectionTimeoutMillis, soTimeoutMillis,
-        blockingSocketTimeoutMillis, user, password, database, clientName, ssl,
-        sslSocketFactory, sslParameters, hostnameVerifier, hostAndPortMapper);
+      int blockingSocketTimeoutMillis, String user, String password, int database,
+      String clientName, boolean ssl, SSLSocketFactory sslSocketFactory,
+      SSLParameters sslParameters, HostnameVerifier hostnameVerifier,
+      HostAndPortMapper hostAndPortMapper) {
+    Builder builder = builder();
+    builder.connectionTimeoutMillis(connectionTimeoutMillis).socketTimeoutMillis(soTimeoutMillis)
+        .blockingSocketTimeoutMillis(blockingSocketTimeoutMillis);
+    if (user != null || password != null) {
+      // deliberately not handling 'user != null && password == null' here
+      builder.credentials(new DefaultRedisCredentials(user, password));
+    }
+    builder.database(database).clientName(clientName);
+    builder.ssl(ssl).sslSocketFactory(sslSocketFactory).sslParameters(sslParameters)
+        .hostnameVerifier(hostnameVerifier);
+    builder.hostAndPortMapper(hostAndPortMapper);
+    return builder.build();
   }
 
+  /**
+   * @deprecated Use
+   *             {@link redis.clients.jedis.DefaultJedisClientConfig.Builder#from(redis.clients.jedis.JedisClientConfig)}.
+   */
+  @Deprecated
   public static DefaultJedisClientConfig copyConfig(JedisClientConfig copy) {
-    return new DefaultJedisClientConfig(copy.getConnectionTimeoutMillis(),
-        copy.getSocketTimeoutMillis(), copy.getBlockingSocketTimeoutMillis(), copy.getUser(),
-        copy.getPassword(), copy.getDatabase(), copy.getClientName(), copy.isSsl(),
-        copy.getSslSocketFactory(), copy.getSslParameters(), copy.getHostnameVerifier(),
-        copy.getHostAndPortMapper());
+    Builder builder = builder();
+    builder.protocol(copy.getRedisProtocol());
+    builder.autoNegotiateProtocol(copy.isAutoNegotiateProtocol());
+    builder.connectionTimeoutMillis(copy.getConnectionTimeoutMillis());
+    builder.socketTimeoutMillis(copy.getSocketTimeoutMillis());
+    builder.blockingSocketTimeoutMillis(copy.getBlockingSocketTimeoutMillis());
+
+    Supplier<RedisCredentials> credentialsProvider = copy.getCredentialsProvider();
+    if (credentialsProvider != null) {
+      builder.credentialsProvider(credentialsProvider);
+    } else {
+      builder.user(copy.getUser());
+      builder.password(copy.getPassword());
+    }
+
+    builder.database(copy.getDatabase());
+    builder.clientName(copy.getClientName());
+
+    builder.ssl(copy.isSsl());
+    builder.sslSocketFactory(copy.getSslSocketFactory());
+    builder.sslParameters(copy.getSslParameters());
+    builder.hostnameVerifier(copy.getHostnameVerifier());
+    builder.sslOptions(copy.getSslOptions());
+    builder.hostAndPortMapper(copy.getHostAndPortMapper());
+
+    builder.clientSetInfoConfig(copy.getClientSetInfoConfig());
+    if (copy.isReadOnlyForRedisClusterReplicas()) {
+      builder.readOnlyForRedisClusterReplicas();
+    }
+
+    builder.authXManager(copy.getAuthXManager());
+
+    return builder.build();
   }
 }

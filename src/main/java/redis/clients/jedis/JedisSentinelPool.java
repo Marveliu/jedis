@@ -6,6 +6,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
@@ -16,6 +18,14 @@ import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.util.Pool;
 
+/**
+ * JedisSentinelPool is a pooled connection client for Redis Sentinel deployments.
+ *
+ * @deprecated Use {@link RedisSentinelClient} instead. RedisSentinelClient provides the same functionality
+ *             with a cleaner API and simplified constructor options. For basic usage, simple
+ *             constructors are available. For advanced configuration, use {@link RedisSentinelClient#builder()}.
+ */
+@Deprecated
 public class JedisSentinelPool extends Pool<Jedis> {
 
   private static final Logger LOG = LoggerFactory.getLogger(JedisSentinelPool.class);
@@ -28,7 +38,12 @@ public class JedisSentinelPool extends Pool<Jedis> {
 
   private volatile HostAndPort currentHostMaster;
   
-  private final Object initPoolLock = new Object();
+  private final Lock initPoolLock = new ReentrantLock(true);
+
+  public JedisSentinelPool(String masterName, Set<HostAndPort> sentinels,
+      final JedisClientConfig masterClientConfig, final JedisClientConfig sentinelClientConfig) {
+    this(masterName, sentinels, new JedisFactory(masterClientConfig), sentinelClientConfig);
+  }
 
   public JedisSentinelPool(String masterName, Set<String> sentinels,
       final GenericObjectPoolConfig<Jedis> poolConfig) {
@@ -146,10 +161,12 @@ public class JedisSentinelPool extends Pool<Jedis> {
       final int sentinelConnectionTimeout, final int sentinelSoTimeout, final String sentinelUser,
       final String sentinelPassword, final String sentinelClientName) {
     this(masterName, parseHostAndPorts(sentinels), poolConfig,
-        DefaultJedisClientConfig.builder().connectionTimeoutMillis(connectionTimeout)
+        DefaultJedisClientConfig.builder().autoNegotiateProtocol(false)
+            .connectionTimeoutMillis(connectionTimeout)
             .socketTimeoutMillis(soTimeout).blockingSocketTimeoutMillis(infiniteSoTimeout)
             .user(user).password(password).database(database).clientName(clientName).build(),
-        DefaultJedisClientConfig.builder().connectionTimeoutMillis(sentinelConnectionTimeout)
+        DefaultJedisClientConfig.builder().autoNegotiateProtocol(false)
+            .connectionTimeoutMillis(sentinelConnectionTimeout)
             .socketTimeoutMillis(sentinelSoTimeout).user(sentinelUser).password(sentinelPassword)
             .clientName(sentinelClientName).build()
     );
@@ -158,18 +175,24 @@ public class JedisSentinelPool extends Pool<Jedis> {
   public JedisSentinelPool(String masterName, Set<String> sentinels,
       final GenericObjectPoolConfig<Jedis> poolConfig, final JedisFactory factory) {
     this(masterName, parseHostAndPorts(sentinels), poolConfig, factory,
-        DefaultJedisClientConfig.builder().build());
+        DefaultJedisClientConfig.builder().autoNegotiateProtocol(false).build());
   }
 
   public JedisSentinelPool(String masterName, Set<HostAndPort> sentinels,
-      final JedisClientConfig masteClientConfig, final JedisClientConfig sentinelClientConfig) {
-    this(masterName, sentinels, new GenericObjectPoolConfig<Jedis>(), masteClientConfig, sentinelClientConfig);
-  }
-
-  public JedisSentinelPool(String masterName, Set<HostAndPort> sentinels,
-      final GenericObjectPoolConfig<Jedis> poolConfig, final JedisClientConfig masteClientConfig,
+      final GenericObjectPoolConfig<Jedis> poolConfig, final JedisClientConfig masterClientConfig,
       final JedisClientConfig sentinelClientConfig) {
-    this(masterName, sentinels, poolConfig, new JedisFactory(masteClientConfig), sentinelClientConfig);
+    this(masterName, sentinels, poolConfig, new JedisFactory(masterClientConfig), sentinelClientConfig);
+  }
+
+  public JedisSentinelPool(String masterName, Set<HostAndPort> sentinels,
+      final JedisFactory factory, final JedisClientConfig sentinelClientConfig) {
+    super(factory);
+
+    this.factory = factory;
+    this.sentinelClientConfig = sentinelClientConfig;
+
+    HostAndPort master = initSentinels(sentinels, masterName);
+    initMaster(master);
   }
 
   public JedisSentinelPool(String masterName, Set<HostAndPort> sentinels,
@@ -202,7 +225,9 @@ public class JedisSentinelPool extends Pool<Jedis> {
   }
 
   private void initMaster(HostAndPort master) {
-    synchronized (initPoolLock) {
+    initPoolLock.lock();
+    
+    try {
       if (!master.equals(currentHostMaster)) {
         currentHostMaster = master;
         factory.setHostAndPort(currentHostMaster);
@@ -212,6 +237,8 @@ public class JedisSentinelPool extends Pool<Jedis> {
 
         LOG.info("Created JedisSentinelPool to master at {}", master);
       }
+    } finally {
+      initPoolLock.unlock();
     }
   }
 
@@ -320,7 +347,7 @@ public class JedisSentinelPool extends Pool<Jedis> {
     protected int port;
     protected long subscribeRetryWaitTimeMillis = 5000;
     protected volatile Jedis j;
-    protected AtomicBoolean running = new AtomicBoolean(false);
+    protected AtomicBoolean running = new AtomicBoolean(true);
 
     protected MasterListener() {
     }
@@ -341,18 +368,16 @@ public class JedisSentinelPool extends Pool<Jedis> {
     @Override
     public void run() {
 
-      running.set(true);
-
       while (running.get()) {
 
         try {
-          // double check that it is not being shutdown
+          final HostAndPort hostPort = new HostAndPort(host, port);
+          j = new Jedis(hostPort, sentinelClientConfig);
+
+          // Shutdown may have happened before the new connection was published.
           if (!running.get()) {
             break;
           }
-          
-          final HostAndPort hostPort = new HostAndPort(host, port);
-          j = new Jedis(hostPort, sentinelClientConfig);
 
           // code for active refresh
           List<String> masterAddr = j.sentinelGetMasterAddrByName(masterName);
@@ -390,8 +415,8 @@ public class JedisSentinelPool extends Pool<Jedis> {
         } catch (JedisException e) {
 
           if (running.get()) {
-            LOG.error("Lost connection to Sentinel at {}:{}. Sleeping 5000ms and retrying.", host,
-              port, e);
+            LOG.warn("Lost connection to Sentinel {}:{}. Sleeping {}ms and retrying.", host, port, subscribeRetryWaitTimeMillis,
+                    e);
             try {
               Thread.sleep(subscribeRetryWaitTimeMillis);
             } catch (InterruptedException e1) {

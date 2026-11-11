@@ -3,15 +3,16 @@ package redis.clients.jedis.commands;
 import java.util.List;
 
 import redis.clients.jedis.Response;
-import redis.clients.jedis.args.BitCountOption;
-import redis.clients.jedis.args.BitOP;
-import redis.clients.jedis.params.BitPosParams;
 import redis.clients.jedis.params.GetExParams;
 import redis.clients.jedis.params.SetParams;
-import redis.clients.jedis.params.StrAlgoLCSParams;
+import redis.clients.jedis.params.MSetExParams;
+
+import redis.clients.jedis.params.IncrexFloatParams;
+import redis.clients.jedis.params.IncrexParams;
+import redis.clients.jedis.params.LCSParams;
 import redis.clients.jedis.resps.LCSMatchResult;
 
-public interface StringPipelineBinaryCommands {
+public interface StringPipelineBinaryCommands extends BitPipelineBinaryCommands {
 
   Response<String> set(byte[] key, byte[] value);
 
@@ -19,18 +20,22 @@ public interface StringPipelineBinaryCommands {
 
   Response<byte[]> get(byte[] key);
 
+  Response<byte[]> setGet(byte[] key, byte[] value);
+
+  Response<byte[]> setGet(byte[] key, byte[] value, SetParams params);
+
   Response<byte[]> getDel(byte[] key);
 
   Response<byte[]> getEx(byte[] key, GetExParams params);
-
-  Response<Boolean> setbit(byte[] key, long offset, boolean value);
-
-  Response<Boolean> getbit(byte[] key, long offset);
 
   Response<Long> setrange(byte[] key, long offset, byte[] value);
 
   Response<byte[]> getrange(byte[] key, long startOffset, long endOffset);
 
+  /**
+   * @deprecated {@link StringPipelineBinaryCommands#setGet(byte[], byte[], redis.clients.jedis.params.SetParams)}.
+   */
+  @Deprecated
   Response<byte[]> getSet(byte[] key, byte[] value);
 
   Response<Long> setnx(byte[] key, byte[] value);
@@ -45,11 +50,51 @@ public interface StringPipelineBinaryCommands {
 
   Response<Long> msetnx(byte[]... keysvalues);
 
+  /**
+   * Multi-set with optional condition and expiration.
+   * <p>
+   * Sets the respective keys to the respective values, similar to {@link #mset(byte[]...) MSET},
+   * but allows conditional set (NX|XX) and expiration options via {@link MSetExParams}.
+   * If the condition is not met for any key, no key is set.
+   * <p>
+   * Both MSET and MSETEX are atomic operations. This means that if multiple keys are provided,
+   * another client will either see the changes for all keys at once, or no changes at all.
+   * <p>
+   * Options (in {@link MSetExParams}): NX or XX, and expiration: EX seconds | PX milliseconds |
+   * EXAT unix-time-seconds | PXAT unix-time-milliseconds | KEEPTTL.
+   * <p>
+   * Time complexity: O(N) where N is the number of keys to set.
+   * @param params condition and expiration parameters
+   * @param keysvalues pairs of keys and their values, e.g. {@code msetex(params, "foo".getBytes(), "foovalue".getBytes(), "bar".getBytes(), "barvalue".getBytes())}
+   * @return {@code Response<Boolean>} that is {@code true} if all keys were set, {@code false} if none were set (condition not satisfied)
+   * @see #mset(byte[]...)
+   * @see #msetnx(byte[]...)
+   */
+  Response<Boolean> msetex(MSetExParams params, byte[]... keysvalues);
+
   Response<Long> incr(byte[] key);
 
   Response<Long> incrBy(byte[] key, long increment);
 
   Response<Double> incrByFloat(byte[] key, double increment);
+
+  /**
+   * Pipeline variant of {@link StringBinaryCommands#increx(byte[])}.
+   * @since 8.0
+   */
+  Response<List<Long>> increx(byte[] key);
+
+  /**
+   * Pipeline variant of {@link StringBinaryCommands#increx(byte[], long, IncrexParams)}.
+   * @since 8.0
+   */
+  Response<List<Long>> increx(byte[] key, long increment, IncrexParams params);
+
+  /**
+   * Pipeline variant of {@link StringBinaryCommands#increx(byte[], double, IncrexFloatParams)}.
+   * @since 8.0
+   */
+  Response<List<Double>> increx(byte[] key, double increment, IncrexFloatParams params);
 
   Response<Long> decr(byte[] key);
 
@@ -61,21 +106,5 @@ public interface StringPipelineBinaryCommands {
 
   Response<Long> strlen(byte[] key);
 
-  Response<Long> bitcount(byte[] key);
-
-  Response<Long> bitcount(byte[] key, long start, long end);
-
-  Response<Long> bitcount(byte[] key, long start, long end, BitCountOption option);
-
-  Response<Long> bitpos(byte[] key, boolean value);
-
-  Response<Long> bitpos(byte[] key, boolean value, BitPosParams params);
-
-  Response<List<Long>> bitfield(byte[] key, byte[]... arguments);
-
-  Response<List<Long>> bitfieldReadonly(byte[] key, byte[]... arguments);
-
-  Response<Long> bitop(BitOP op, byte[] destKey, byte[]... srcKeys);
-
-  Response<LCSMatchResult> strAlgoLCSKeys(final byte[] keyA, final byte[] keyB, final StrAlgoLCSParams params);
+  Response<LCSMatchResult> lcs(byte[] keyA, byte[] keyB, LCSParams params);
 }

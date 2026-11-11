@@ -1,5 +1,7 @@
 package redis.clients.jedis.providers;
 
+import java.util.Collections;
+import java.util.Map;
 import org.apache.commons.pool2.PooledObjectFactory;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 
@@ -9,26 +11,67 @@ import redis.clients.jedis.ConnectionFactory;
 import redis.clients.jedis.ConnectionPool;
 import redis.clients.jedis.HostAndPort;
 import redis.clients.jedis.JedisClientConfig;
+import redis.clients.jedis.MaintenanceNotificationsConfig;
+import redis.clients.jedis.annots.Experimental;
+import redis.clients.jedis.csc.Cache;
 import redis.clients.jedis.util.Pool;
 
 public class PooledConnectionProvider implements ConnectionProvider {
 
   private final Pool<Connection> pool;
+  private Object connectionMapKey = "";
 
   public PooledConnectionProvider(HostAndPort hostAndPort) {
     this(new ConnectionFactory(hostAndPort));
+    this.connectionMapKey = hostAndPort;
   }
 
   public PooledConnectionProvider(HostAndPort hostAndPort, JedisClientConfig clientConfig) {
-    this(new ConnectionFactory(hostAndPort, clientConfig));
+    this(new ConnectionPool(hostAndPort, clientConfig));
+    this.connectionMapKey = hostAndPort;
+  }
+
+  @Experimental
+  public PooledConnectionProvider(HostAndPort hostAndPort, JedisClientConfig clientConfig, Cache clientSideCache) {
+    this(new ConnectionPool(hostAndPort, clientConfig, clientSideCache));
+    this.connectionMapKey = hostAndPort;
+  }
+
+  public PooledConnectionProvider(HostAndPort hostAndPort, JedisClientConfig clientConfig,
+      GenericObjectPoolConfig<Connection> poolConfig) {
+    this(new ConnectionPool(hostAndPort, clientConfig, poolConfig));
+    this.connectionMapKey = hostAndPort;
+  }
+
+  @Experimental
+  public PooledConnectionProvider(HostAndPort hostAndPort, JedisClientConfig clientConfig, Cache clientSideCache,
+      GenericObjectPoolConfig<Connection> poolConfig) {
+    this(new ConnectionPool(hostAndPort, clientConfig, clientSideCache, poolConfig));
+    this.connectionMapKey = hostAndPort;
+  }
+
+  /**
+   * Creates the provider with maintenance notifications configured for its pooled connections;
+   * {@code null} disables them.
+   * @since 8.1
+   */
+  @Experimental
+  public PooledConnectionProvider(HostAndPort hostAndPort, JedisClientConfig clientConfig,
+      Cache clientSideCache, GenericObjectPoolConfig<Connection> poolConfig,
+      MaintenanceNotificationsConfig maintConfig) {
+    this(new ConnectionPool(hostAndPort, clientConfig, clientSideCache, poolConfig, maintConfig));
+    this.connectionMapKey = hostAndPort;
   }
 
   public PooledConnectionProvider(PooledObjectFactory<Connection> factory) {
-    this(factory, new GenericObjectPoolConfig<>());
+    this(new ConnectionPool(factory));
+    this.connectionMapKey = factory;
   }
 
-  public PooledConnectionProvider(PooledObjectFactory<Connection> factory, GenericObjectPoolConfig<Connection> poolConfig) {
+  public PooledConnectionProvider(PooledObjectFactory<Connection> factory,
+      GenericObjectPoolConfig<Connection> poolConfig) {
     this(new ConnectionPool(factory, poolConfig));
+    this.connectionMapKey = factory;
   }
 
   private PooledConnectionProvider(Pool<Connection> pool) {
@@ -52,5 +95,15 @@ public class PooledConnectionProvider implements ConnectionProvider {
   @Override
   public Connection getConnection(CommandArguments args) {
     return pool.getResource();
+  }
+
+  @Override
+  public Map<?, Pool<Connection>> getConnectionMap() {
+    return Collections.singletonMap(connectionMapKey, pool);
+  }
+
+  @Override
+  public Map<?, Pool<Connection>> getPrimaryNodesConnectionMap() {
+    return Collections.singletonMap(connectionMapKey, pool);
   }
 }

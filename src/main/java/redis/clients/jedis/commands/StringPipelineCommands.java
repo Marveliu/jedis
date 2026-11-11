@@ -1,17 +1,18 @@
 package redis.clients.jedis.commands;
 
 import redis.clients.jedis.Response;
-import redis.clients.jedis.args.BitCountOption;
-import redis.clients.jedis.args.BitOP;
-import redis.clients.jedis.params.BitPosParams;
 import redis.clients.jedis.params.GetExParams;
 import redis.clients.jedis.params.SetParams;
-import redis.clients.jedis.params.StrAlgoLCSParams;
+import redis.clients.jedis.params.MSetExParams;
+
+import redis.clients.jedis.params.IncrexFloatParams;
+import redis.clients.jedis.params.IncrexParams;
+import redis.clients.jedis.params.LCSParams;
 import redis.clients.jedis.resps.LCSMatchResult;
 
 import java.util.List;
 
-public interface StringPipelineCommands {
+public interface StringPipelineCommands extends BitPipelineCommands {
 
   Response<String> set(String key, String value);
 
@@ -19,18 +20,22 @@ public interface StringPipelineCommands {
 
   Response<String> get(String key);
 
+  Response<String> setGet(String key, String value);
+
+  Response<String> setGet(String key, String value, SetParams params);
+
   Response<String> getDel(String key);
 
   Response<String> getEx(String key, GetExParams params);
-
-  Response<Boolean> setbit(String key, long offset, boolean value);
-
-  Response<Boolean> getbit(String key, long offset);
 
   Response<Long> setrange(String key, long offset, String value);
 
   Response<String> getrange(String key, long startOffset, long endOffset);
 
+  /**
+   * @deprecated Use {@link StringPipelineCommands#setGet(java.lang.String, java.lang.String)}.
+   */
+  @Deprecated
   Response<String> getSet(String key, String value);
 
   Response<Long> setnx(String key, String value);
@@ -45,11 +50,51 @@ public interface StringPipelineCommands {
 
   Response<Long> msetnx(String... keysvalues);
 
+  /**
+   * Multi-set with optional condition and expiration.
+   * <p>
+   * Sets the respective keys to the respective values, similar to {@link #mset(String...) MSET},
+   * but allows conditional set (NX|XX) and expiration options via {@link MSetExParams}.
+   * If the condition is not met for any key, no key is set.
+   * <p>
+   * Both MSET and MSETEX are atomic operations. This means that if multiple keys are provided,
+   * another client will either see the changes for all keys at once, or no changes at all.
+   * <p>
+   * Options (in {@link MSetExParams}): NX or XX, and expiration: EX seconds | PX milliseconds |
+   * EXAT unix-time-seconds | PXAT unix-time-milliseconds | KEEPTTL.
+   * <p>
+   * Time complexity: O(N) where N is the number of keys to set.
+   * @param params condition and expiration parameters
+   * @param keysvalues pairs of keys and their values, e.g. {@code msetex(params, "foo", "foovalue", "bar", "barvalue")}
+   * @return {@code Response<Boolean>} that is {@code true} if all keys were set, {@code false} if none were set (condition not satisfied)
+   * @see #mset(String...)
+   * @see #msetnx(String...)
+   */
+  Response<Boolean> msetex(MSetExParams params, String... keysvalues);
+
   Response<Long> incr(String key);
 
   Response<Long> incrBy(String key, long increment);
 
   Response<Double> incrByFloat(String key, double increment);
+
+  /**
+   * Pipeline variant of {@link StringCommands#increx(String)}.
+   * @since 8.0
+   */
+  Response<List<Long>> increx(String key);
+
+  /**
+   * Pipeline variant of {@link StringCommands#increx(String, long, IncrexParams)}.
+   * @since 8.0
+   */
+  Response<List<Long>> increx(String key, long increment, IncrexParams params);
+
+  /**
+   * Pipeline variant of {@link StringCommands#increx(String, double, IncrexFloatParams)}.
+   * @since 8.0
+   */
+  Response<List<Double>> increx(String key, double increment, IncrexFloatParams params);
 
   Response<Long> decr(String key);
 
@@ -61,22 +106,5 @@ public interface StringPipelineCommands {
 
   Response<Long> strlen(String key);
 
-  Response<Long> bitcount(String key);
-
-  Response<Long> bitcount(String key, long start, long end);
-
-  Response<Long> bitcount(String key, long start, long end, BitCountOption option);
-
-  Response<Long> bitpos(String key, boolean value);
-
-  Response<Long> bitpos(String key, boolean value, BitPosParams params);
-
-  Response<List<Long>> bitfield(String key, String...arguments);
-
-  Response<List<Long>> bitfieldReadonly(String key, String...arguments);
-
-  Response<Long> bitop(BitOP op, String destKey, String... srcKeys);
-
-  Response<LCSMatchResult> strAlgoLCSKeys(String keyA, String keyB, StrAlgoLCSParams params);
-
+  Response<LCSMatchResult> lcs(String keyA, String keyB, LCSParams params);
 }

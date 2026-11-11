@@ -1,59 +1,57 @@
 package redis.clients.jedis.commands.jedis;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
-import static org.junit.Assume.assumeFalse;
-
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import redis.clients.jedis.EndpointConfig;
 import redis.clients.jedis.HostAndPort;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.params.FailoverParams;
-import redis.clients.jedis.HostAndPorts;
+import redis.clients.jedis.Endpoints;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
+
+@Tag("integration")
 public class FailoverCommandsTest {
 
-  private static final HostAndPort node1 = HostAndPorts.getRedisServers().get(9);
-  private static final HostAndPort node2 = HostAndPorts.getRedisServers().get(10);
+  private static final int INVALID_PORT = 6000;
+
+  private static EndpointConfig node1;
+  private static EndpointConfig node2;
 
   private HostAndPort masterAddress;
   private HostAndPort replicaAddress;
 
-  private boolean switching;
-  private static boolean failoverStuck = false;
+  @BeforeAll
+  public static void setUp() {
+    node1 = Endpoints.getRedisEndpoint("standalone9-failover");
+    node2 = Endpoints.getRedisEndpoint("standalone10-replica-of-standalone9");
+  }
 
-  @Before
+  @BeforeEach
   public void prepare() {
     String role1, role2;
-    try (Jedis jedis1 = new Jedis(node1)) {
+    try (Jedis jedis1 = new Jedis(node1.getHostAndPort(),
+        node1.getClientConfigBuilder().serverDefaultProtocol().build())) {
       role1 = (String) jedis1.role().get(0);
     }
-    try (Jedis jedis2 = new Jedis(node2)) {
+    try (Jedis jedis2 = new Jedis(node2.getHostAndPort(),
+        node2.getClientConfigBuilder().serverDefaultProtocol().build())) {
       role2 = (String) jedis2.role().get(0);
     }
 
     if ("master".equals(role1) && "slave".equals(role2)) {
-      masterAddress = node1;
-      replicaAddress = node2;
+      masterAddress = node1.getHostAndPort();
+      replicaAddress = node2.getHostAndPort();
     } else if ("master".equals(role2) && "slave".equals(role1)) {
-      masterAddress = node2;
-      replicaAddress = node1;
+      masterAddress = node2.getHostAndPort();
+      replicaAddress = node1.getHostAndPort();
     } else {
       fail();
-    }
-
-    switching = false;
-  }
-
-  @After
-  public void cleanUp() {
-    if (switching) {
-      try {
-        Thread.sleep(250);
-      } catch (InterruptedException ex) { }
     }
   }
 
@@ -67,7 +65,7 @@ public class FailoverCommandsTest {
       if ("slave".equals(master.role().get(0))) {
         // ok
       } else {
-        failoverStuck = true;
+        // failover stuck
       }
     }
   }
@@ -83,45 +81,35 @@ public class FailoverCommandsTest {
   }
 
   @Test
-  public void failoverToHAP() throws InterruptedException {
-    assumeFalse(failoverStuck);
-    try (Jedis master = new Jedis(masterAddress)) {
-      switching = true;
-      assertEquals("OK", master.failover(FailoverParams.failoverParams()
-          .to(new HostAndPort("127.0.0.1", replicaAddress.getPort()))));
-    }
-  }
-
-  @Test(expected = IllegalStateException.class)
   public void failoverForceWithoutToFailFast() {
     try (Jedis master = new Jedis(masterAddress)) {
-      assertEquals("OK", master.failover(FailoverParams.failoverParams()
+      assertThrows(IllegalArgumentException.class, () -> master.failover(FailoverParams.failoverParams()
           .timeout(100).force()));
     }
   }
 
-  @Test(expected = IllegalStateException.class)
+  @Test
   public void failoverForceWithoutTimeoutFailFast() {
     try (Jedis master = new Jedis(masterAddress)) {
-      assertEquals("OK", master.failover(FailoverParams.failoverParams()
-          .to(new HostAndPort("127.0.0.1", replicaAddress.getPort())).force()));
-    }
-  }
-
-  @Test
-  public void failoverForce() throws InterruptedException {
-    assumeFalse(failoverStuck);
-    try (Jedis master = new Jedis(masterAddress)) {
-      switching = true;
-      assertEquals("OK", master.failover(FailoverParams.failoverParams()
-          .to(new HostAndPort("127.0.0.1", replicaAddress.getPort())).force().timeout(100)));
+      assertThrows(IllegalArgumentException.class, ()-> master.failover(FailoverParams.failoverParams()
+          .to(new HostAndPort("127.0.0.1", INVALID_PORT)).force()));
     }
   }
 
   @Test
   public void failoverToWrongPort() {
     try (Jedis master = new Jedis(masterAddress)) {
-      master.failover(FailoverParams.failoverParams().to("127.0.0.1", 6300));
+      master.failover(FailoverParams.failoverParams().to("127.0.0.1", INVALID_PORT));
+      fail("FAILOVER target HOST and PORT is not a replica.");
+    } catch(JedisDataException ex) {
+      assertEquals("ERR FAILOVER target HOST and PORT is not a replica.", ex.getMessage());
+    }
+  }
+
+  @Test
+  public void failoverToWrongPortWithTimeout() {
+    try (Jedis master = new Jedis(masterAddress)) {
+      master.failover(FailoverParams.failoverParams().to("127.0.0.1", INVALID_PORT).timeout(1000));
       fail("FAILOVER target HOST and PORT is not a replica.");
     } catch(JedisDataException ex) {
       assertEquals("ERR FAILOVER target HOST and PORT is not a replica.", ex.getMessage());

@@ -1,49 +1,22 @@
 package redis.clients.jedis.exceptions;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import redis.clients.jedis.HostAndPort;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 public class ExceptionsTest {
 
   private static String MESSAGE;
   private static Throwable CAUSE;
 
-  @BeforeClass
+  @BeforeAll
   public static void prepare() {
     MESSAGE = "This is a test message.";
     CAUSE = new Throwable("This is a test cause.");
-  }
-
-  @Test
-  public void abortedTransaction() {
-    try {
-      throw new AbortedTransactionException(MESSAGE);
-    } catch (Exception e) {
-      assertSame(AbortedTransactionException.class, e.getClass());
-      assertEquals(MESSAGE, e.getMessage());
-      assertNull(e.getCause());
-    }
-
-    try {
-      throw new AbortedTransactionException(CAUSE);
-    } catch (Exception e) {
-      assertSame(AbortedTransactionException.class, e.getClass());
-      assertEquals(CAUSE, e.getCause());
-      assertEquals(CAUSE.toString(), e.getMessage());
-    }
-
-    try {
-      throw new AbortedTransactionException(MESSAGE, CAUSE);
-    } catch (Exception e) {
-      assertSame(AbortedTransactionException.class, e.getClass());
-      assertEquals(MESSAGE, e.getMessage());
-      assertEquals(CAUSE, e.getCause());
-    }
   }
 
   @Test

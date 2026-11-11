@@ -1,60 +1,87 @@
 package redis.clients.jedis.modules;
 
-import static org.junit.Assume.assumeTrue;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import redis.clients.jedis.*;
+import redis.clients.jedis.commands.CommandsTestsParameters;
+import redis.clients.jedis.util.EnvCondition;
+import redis.clients.jedis.util.RedisVersionCondition;
+import redis.clients.jedis.util.TestEnvUtil;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import redis.clients.jedis.Connection;
 
-import redis.clients.jedis.HostAndPort;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.Protocol;
-import redis.clients.jedis.UnifiedJedis;
-import redis.clients.jedis.exceptions.JedisConnectionException;
-import redis.clients.jedis.providers.PooledConnectionProvider;
 
+@Tag("integration")
 public abstract class RedisModuleCommandsTestBase {
 
-  protected static final HostAndPort hnp = new HostAndPort(Protocol.DEFAULT_HOST, 6479);
+  protected static String preferredEndpointId = "modules-docker";
 
-  private static final PooledConnectionProvider provider = new PooledConnectionProvider(hnp);
+  @RegisterExtension
+  public RedisVersionCondition versionCondition = new RedisVersionCondition(
+      () -> Endpoints.getRedisEndpoint(preferredEndpointId));
+
+  @RegisterExtension
+  public static EnvCondition envCondition = new EnvCondition();
+
+  protected static EndpointConfig endpoint;
+
+  /**
+   * Input data for parameterized tests. In principle all subclasses of this
+   * class should be parameterized tests, to run with several versions of RESP.
+   *
+   * @see CommandsTestsParameters#respVersions()
+   */
+  protected final RedisProtocol protocol;
+
+  protected Jedis jedis;
   protected UnifiedJedis client;
 
-  public RedisModuleCommandsTestBase() {
-    super();
+  /**
+   * The RESP protocol is to be injected by the subclasses, usually via JUnit
+   * parameterized tests, because most of the subclassed tests are meant to be
+   * executed against multiple RESP versions. For the special cases where a single
+   * RESP version is relevant, we still force the subclass to be explicit and
+   * call this constructor.
+   *
+   * @param protocol The RESP protocol to use during the tests.
+   */
+  public RedisModuleCommandsTestBase(RedisProtocol protocol) {
+    this.protocol = protocol;
   }
 
+  // BeforeClass
   public static void prepare() {
-    try (Connection connection = new Connection(hnp)) {
-      assumeTrue("No Redis running on 6479 port.", connection.ping());
-    } catch (JedisConnectionException jce) {
-      assumeTrue("Could not connect to Redis running on 6479 port.", false);
-    }
+    endpoint = Endpoints.getRedisEndpoint(preferredEndpointId);
   }
 
-  @Before
+  @BeforeEach
   public void setUp() {
-    try (Jedis jedis = createJedis()) {
-      jedis.flushAll();
+    if (endpoint == null) {
+      return;
     }
-    client = new UnifiedJedis(provider);
+    DefaultJedisClientConfig.Builder configBuilder = endpoint.getClientConfigBuilder().timeoutMillis(500);
+    if (protocol == null) {
+      // The UnifiedJedis-style param `null` means "auto-negotiate, resolves to RESP3 on the
+      // test environment". Legacy Jedis doesn't support auto-negotiation, so we force RESP3.
+      configBuilder.protocol(RedisProtocol.RESP3);
+    } else {
+      configBuilder.protocol(protocol);
+    }
+    jedis = new Jedis(endpoint.getHostAndPort(),
+        configBuilder.build());
+    jedis.flushAll();
+    client = RedisClient.builder().hostAndPort(endpoint.getHostAndPort())
+        .clientConfig(endpoint.getClientConfigBuilder().protocol(protocol).build()).build();
   }
-//
-//  @After
-//  public void tearDown() throws Exception {
-//    client.close();
-//  }
-//
-//  public static void tearDown() {
-//    client.close();
-//  }
 
-  protected static Connection createConnection() {
-    return new Connection(hnp);
+  @AfterEach
+  public void tearDown() throws Exception {
+    if (endpoint == null) {
+      return;
+    }
+    client.close();
+    jedis.close();
   }
 
-  protected static Jedis createJedis() {
-    return new Jedis(hnp);
-  }
 }

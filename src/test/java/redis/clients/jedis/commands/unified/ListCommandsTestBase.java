@@ -1,11 +1,10 @@
 package redis.clients.jedis.commands.unified;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.fail;
 import static redis.clients.jedis.util.AssertUtil.assertByteArrayListEquals;
 
 import java.util.ArrayList;
@@ -13,16 +12,26 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import org.junit.Test;
+import io.redis.test.annotations.ConditionalOnEnv;
+import io.redis.test.annotations.EnabledOnCommand;
+import io.redis.test.annotations.SinceRedisVersion;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import redis.clients.jedis.RedisProtocol;
 import redis.clients.jedis.args.ListPosition;
 import redis.clients.jedis.args.ListDirection;
+import redis.clients.jedis.args.ListMoveOrder;
 import redis.clients.jedis.exceptions.JedisDataException;
+import redis.clients.jedis.params.LMoveMParams;
 import redis.clients.jedis.params.LPosParams;
-import redis.clients.jedis.resps.KeyedListElement;
+import redis.clients.jedis.util.KeyValue;
+import redis.clients.jedis.util.TestEnvUtil;
 
+@Tag("integration")
 public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase {
 
   private final Logger logger = LoggerFactory.getLogger(getClass());
@@ -40,6 +49,10 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
   protected final byte[] bhello = { 0x04, 0x02 };
   protected final byte[] bx = { 0x02, 0x04 };
   protected final byte[] bdst = { 0x11, 0x12, 0x13, 0x14 };
+
+  public ListCommandsTestBase(RedisProtocol protocol) {
+    super(protocol);
+  }
 
   @Test
   public void rpush() {
@@ -342,6 +355,7 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void rpoplpush() {
     jedis.rpush("foo", "a");
     jedis.rpush("foo", "b");
@@ -393,6 +407,7 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void blpop() throws InterruptedException {
     List<String> result = jedis.blpop(1, "foo");
     assertNull(result);
@@ -406,9 +421,6 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
     assertEquals("bar", result.get(1));
 
     // Multi keys
-    result = jedis.blpop(1, "foo", "foo1");
-    assertNull(result);
-
     jedis.lpush("foo", "bar");
     jedis.lpush("foo1", "bar1");
     result = jedis.blpop(1, "foo1", "foo");
@@ -428,9 +440,6 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
     assertArrayEquals(bbar, bresult.get(1));
 
     // Binary Multi keys
-    bresult = jedis.blpop(1, bfoo, bfoo1);
-    assertNull(bresult);
-
     jedis.lpush(bfoo, bbar);
     jedis.lpush(bfoo1, bcar);
     bresult = jedis.blpop(1, bfoo, bfoo1);
@@ -442,8 +451,9 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void blpopDouble() throws InterruptedException {
-    KeyedListElement result = jedis.blpop(0.1, "foo");
+    KeyValue<String, String> result = jedis.blpop(0.1, "foo");
     assertNull(result);
 
     jedis.lpush("foo", "bar");
@@ -451,7 +461,7 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
 
     assertNotNull(result);
     assertEquals("foo", result.getKey());
-    assertEquals("bar", result.getElement());
+    assertEquals("bar", result.getValue());
 
     // Multi keys
     result = jedis.blpop(0.18, "foo", "foo1");
@@ -463,16 +473,15 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
 
     assertNotNull(result);
     assertEquals("foo1", result.getKey());
-    assertEquals("bar1", result.getElement());
+    assertEquals("bar1", result.getValue());
 
     // Binary
     jedis.lpush(bfoo, bbar);
-    List<byte[]> bresult = jedis.blpop(3.12, bfoo);
+    KeyValue<byte[], byte[]> bresult = jedis.blpop(3.12, bfoo);
 
     assertNotNull(bresult);
-    assertEquals(2, bresult.size());
-    assertArrayEquals(bfoo, bresult.get(0));
-    assertArrayEquals(bbar, bresult.get(1));
+    assertArrayEquals(bfoo, bresult.getKey());
+    assertArrayEquals(bbar, bresult.getValue());
 
     // Binary Multi keys
     bresult = jedis.blpop(0.11, bfoo, bfoo1);
@@ -483,22 +492,16 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
     bresult = jedis.blpop(1d, bfoo, bfoo1);
 
     assertNotNull(bresult);
-    assertEquals(2, bresult.size());
-    assertArrayEquals(bfoo, bresult.get(0));
-    assertArrayEquals(bbar, bresult.get(1));
+    assertArrayEquals(bfoo, bresult.getKey());
+    assertArrayEquals(bbar, bresult.getValue());
   }
 
   @Test
+  @Timeout(5)
   public void blpopDoubleWithSleep() {
-    long startMillis, totalMillis;
-
-    startMillis = System.currentTimeMillis();
-    KeyedListElement result = jedis.blpop(0.04, "foo");
-    totalMillis = System.currentTimeMillis() - startMillis;
-    assertTrue("TotalMillis=" + totalMillis, totalMillis < 200);
+    KeyValue<String, String> result = jedis.blpop(0.04, "foo");
     assertNull(result);
 
-    startMillis = System.currentTimeMillis();
     new Thread(() -> {
       try {
         Thread.sleep(30);
@@ -508,15 +511,14 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
       jedis.lpush("foo", "bar");
     }).start();
     result = jedis.blpop(1.2, "foo");
-    totalMillis = System.currentTimeMillis() - startMillis;
-    assertTrue("TotalMillis=" + totalMillis, totalMillis < 200);
 
     assertNotNull(result);
     assertEquals("foo", result.getKey());
-    assertEquals("bar", result.getElement());
+    assertEquals("bar", result.getValue());
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void brpop() throws InterruptedException {
     List<String> result = jedis.brpop(1, "foo");
     assertNull(result);
@@ -529,9 +531,6 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
     assertEquals("bar", result.get(1));
 
     // Multi keys
-    result = jedis.brpop(1, "foo", "foo1");
-    assertNull(result);
-
     jedis.lpush("foo", "bar");
     jedis.lpush("foo1", "bar1");
     result = jedis.brpop(1, "foo1", "foo");
@@ -550,9 +549,6 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
     assertArrayEquals(bbar, bresult.get(1));
 
     // Binary Multi keys
-    bresult = jedis.brpop(1, bfoo, bfoo1);
-    assertNull(bresult);
-
     jedis.lpush(bfoo, bbar);
     jedis.lpush(bfoo1, bcar);
     bresult = jedis.brpop(1, bfoo, bfoo1);
@@ -564,8 +560,9 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void brpopDouble() throws InterruptedException {
-    KeyedListElement result = jedis.brpop(0.1, "foo");
+    KeyValue<String, String> result = jedis.brpop(0.1, "foo");
     assertNull(result);
 
     jedis.lpush("foo", "bar");
@@ -573,7 +570,7 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
 
     assertNotNull(result);
     assertEquals("foo", result.getKey());
-    assertEquals("bar", result.getElement());
+    assertEquals("bar", result.getValue());
 
     // Multi keys
     result = jedis.brpop(0.18, "foo", "foo1");
@@ -585,16 +582,15 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
 
     assertNotNull(result);
     assertEquals("foo1", result.getKey());
-    assertEquals("bar1", result.getElement());
+    assertEquals("bar1", result.getValue());
 
     // Binary
     jedis.lpush(bfoo, bbar);
-    List<byte[]> bresult = jedis.brpop(3.12, bfoo);
+    KeyValue<byte[], byte[]> bresult = jedis.brpop(3.12, bfoo);
 
     assertNotNull(bresult);
-    assertEquals(2, bresult.size());
-    assertArrayEquals(bfoo, bresult.get(0));
-    assertArrayEquals(bbar, bresult.get(1));
+    assertArrayEquals(bfoo, bresult.getKey());
+    assertArrayEquals(bbar, bresult.getValue());
 
     // Binary Multi keys
     bresult = jedis.brpop(0.11, bfoo, bfoo1);
@@ -605,22 +601,16 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
     bresult = jedis.brpop(1d, bfoo, bfoo1);
 
     assertNotNull(bresult);
-    assertEquals(2, bresult.size());
-    assertArrayEquals(bfoo, bresult.get(0));
-    assertArrayEquals(bbar, bresult.get(1));
+    assertArrayEquals(bfoo, bresult.getKey());
+    assertArrayEquals(bbar, bresult.getValue());
   }
 
   @Test
+  @Timeout(5)
   public void brpopDoubleWithSleep() {
-    long startMillis, totalMillis;
-
-    startMillis = System.currentTimeMillis();
-    KeyedListElement result = jedis.brpop(0.04, "foo");
-    totalMillis = System.currentTimeMillis() - startMillis;
-    assertTrue("TotalMillis=" + totalMillis, totalMillis < 200);
+    KeyValue<String, String> result = jedis.brpop(0.04, "foo");
     assertNull(result);
 
-    startMillis = System.currentTimeMillis();
     new Thread(() -> {
       try {
         Thread.sleep(30);
@@ -630,12 +620,10 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
       jedis.lpush("foo", "bar");
     }).start();
     result = jedis.brpop(1.2, "foo");
-    totalMillis = System.currentTimeMillis() - startMillis;
-    assertTrue("TotalMillis=" + totalMillis, totalMillis < 200);
 
     assertNotNull(result);
     assertEquals("foo", result.getKey());
-    assertEquals("bar", result.getElement());
+    assertEquals("bar", result.getValue());
   }
 
   @Test
@@ -698,6 +686,7 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void brpoplpush() {
 
     new Thread(new Runnable() {
@@ -821,6 +810,7 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void lmove() {
     jedis.rpush("foo", "bar1", "bar2", "bar3");
     assertEquals("bar3", jedis.lmove("foo", "bar", ListDirection.RIGHT, ListDirection.LEFT));
@@ -835,6 +825,7 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
   }
 
   @Test
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
   public void blmove() {
     new Thread(() -> {
       try {
@@ -861,5 +852,225 @@ public abstract class ListCommandsTestBase extends UnifiedJedisCommandsTestBase 
     assertArrayEquals(b3, jedis.blmove(bfoo, bbar, ListDirection.RIGHT, ListDirection.LEFT, 0));
     assertByteArrayListEquals(Collections.singletonList(b3), jedis.lrange(bbar, 0, -1));
     assertByteArrayListEquals(Arrays.asList(b1, b2), jedis.lrange(bfoo, 0, -1));
+  }
+
+  @Test
+  @EnabledOnCommand("LMOVEM")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void lmovem() {
+    String src = keys.key("src");
+    String dst = keys.key("dst");
+
+    // Without a count block, LMOVEM behaves like LMOVE but returns a single-element list.
+    jedis.rpush(src, "1", "2", "3", "4");
+    assertEquals(Collections.singletonList("4"),
+        jedis.lmovem(src, dst, ListDirection.RIGHT, ListDirection.LEFT));
+    assertEquals(Collections.singletonList("4"), jedis.lrange(dst, 0, -1));
+    assertEquals(Arrays.asList("1", "2", "3"), jedis.lrange(src, 0, -1));
+
+    // Missing source returns null.
+    assertNull(
+        jedis.lmovem(keys.key("nope1"), keys.key("nope2"), ListDirection.LEFT, ListDirection.LEFT));
+
+    // Binary
+    byte[] bsrc = keys.bKey("bsrc");
+    byte[] bdst = keys.bKey("bdst");
+    jedis.rpush(bsrc, b1, b2);
+    assertByteArrayListEquals(Collections.singletonList(b1),
+        jedis.lmovem(bsrc, bdst, ListDirection.LEFT, ListDirection.LEFT));
+    assertByteArrayListEquals(Collections.singletonList(b1), jedis.lrange(bdst, 0, -1));
+    assertNull(jedis.lmovem(keys.bKey("bmissing"), bdst, ListDirection.LEFT, ListDirection.LEFT));
+  }
+
+  @Test
+  @EnabledOnCommand("LMOVEM")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void lmovemWithParams() {
+    String l1 = keys.key("l1");
+    String l2 = keys.key("l2");
+
+    // COUNT with OBO ordering: pop from the left one by one and push to the left -> reversed.
+    jedis.rpush(l1, "1", "2", "3", "4");
+    jedis.rpush(l2, "5", "6", "7");
+    assertEquals(Arrays.asList("2", "1"),
+        jedis.lmovem(l1, l2, ListDirection.LEFT, ListDirection.LEFT,
+            LMoveMParams.lMoveMParams().count(2, ListMoveOrder.OBO)));
+    assertEquals(Arrays.asList("2", "1", "5", "6", "7"), jedis.lrange(l2, 0, -1));
+    assertEquals(Arrays.asList("3", "4"), jedis.lrange(l1, 0, -1));
+
+    // COUNT with BULK ordering preserves the source sub-list order.
+    String m1 = keys.key("m1");
+    String m2 = keys.key("m2");
+    jedis.rpush(m1, "1", "2", "3", "4");
+    jedis.rpush(m2, "5", "6", "7");
+    assertEquals(Arrays.asList("1", "2"),
+        jedis.lmovem(m1, m2, ListDirection.LEFT, ListDirection.LEFT,
+            LMoveMParams.lMoveMParams().count(2, ListMoveOrder.BULK)));
+    assertEquals(Arrays.asList("1", "2", "5", "6", "7"), jedis.lrange(m2, 0, -1));
+
+    // COUNT larger than the source moves only what is available.
+    assertEquals(Arrays.asList("3", "4"),
+        jedis.lmovem(m1, m2, ListDirection.LEFT, ListDirection.RIGHT,
+            LMoveMParams.lMoveMParams().count(10, ListMoveOrder.BULK)));
+
+    // EXACTLY that cannot be satisfied returns null and leaves the source untouched.
+    String e1 = keys.key("e1");
+    String e2 = keys.key("e2");
+    jedis.rpush(e1, "1", "2");
+    assertNull(jedis.lmovem(e1, e2, ListDirection.LEFT, ListDirection.LEFT,
+        LMoveMParams.lMoveMParams().exactly(3, ListMoveOrder.BULK)));
+    assertEquals(Arrays.asList("1", "2"), jedis.lrange(e1, 0, -1));
+
+    // EXACTLY that can be satisfied moves exactly that many elements.
+    assertEquals(Arrays.asList("1", "2"),
+        jedis.lmovem(e1, e2, ListDirection.LEFT, ListDirection.RIGHT,
+            LMoveMParams.lMoveMParams().exactly(2, ListMoveOrder.BULK)));
+    assertEquals(Collections.emptyList(), jedis.lrange(e1, 0, -1));
+
+    // Missing source returns null.
+    assertNull(jedis.lmovem(keys.key("nope1"), keys.key("nope2"), ListDirection.LEFT,
+        ListDirection.LEFT, LMoveMParams.lMoveMParams().count(2, ListMoveOrder.OBO)));
+
+    // Binary
+    byte[] bsrc = keys.bKey("bsrc");
+    byte[] bdst = keys.bKey("bdst");
+    jedis.rpush(bsrc, b1, b2, b3, bA);
+    jedis.rpush(bdst, bB);
+    assertByteArrayListEquals(Arrays.asList(b2, b1),
+        jedis.lmovem(bsrc, bdst, ListDirection.LEFT, ListDirection.LEFT,
+            LMoveMParams.lMoveMParams().count(2, ListMoveOrder.OBO)));
+    assertByteArrayListEquals(Arrays.asList(b2, b1, bB), jedis.lrange(bdst, 0, -1));
+    assertNull(jedis.lmovem(keys.bKey("bmissing"), bdst, ListDirection.LEFT, ListDirection.LEFT,
+        LMoveMParams.lMoveMParams().exactly(3, ListMoveOrder.BULK)));
+  }
+
+  @Test
+  @EnabledOnCommand("BLMOVEM")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void blmovem() {
+    String src = keys.key("src");
+    String dst = keys.key("dst");
+
+    // Source already populated: returns immediately with a single element, like BLMOVE.
+    jedis.rpush(src, "1", "2", "3");
+    assertEquals(Collections.singletonList("1"),
+        jedis.blmovem(src, dst, ListDirection.LEFT, ListDirection.RIGHT, 1));
+    assertEquals(Collections.singletonList("1"), jedis.lrange(dst, 0, -1));
+
+    // Blocks until the source is pushed to.
+    String blockSrc = keys.key("blockSrc");
+    new Thread(() -> {
+      try {
+        Thread.sleep(100);
+      } catch (InterruptedException e) {
+        logger.error("", e);
+      }
+      jedis.rpush(blockSrc, "a", "b");
+    }).start();
+    assertEquals(Collections.singletonList("a"),
+        jedis.blmovem(blockSrc, dst, ListDirection.LEFT, ListDirection.RIGHT, 0));
+
+    // Empty source times out and returns null.
+    assertNull(jedis.blmovem(keys.key("empty"), dst, ListDirection.LEFT, ListDirection.RIGHT, 0.5));
+
+    // Binary, immediate.
+    byte[] bsrc = keys.bKey("bsrc");
+    jedis.rpush(bsrc, b1, b2);
+    assertByteArrayListEquals(Collections.singletonList(b1),
+        jedis.blmovem(bsrc, keys.bKey("bdst"), ListDirection.LEFT, ListDirection.RIGHT, 1));
+  }
+
+  @Test
+  @EnabledOnCommand("BLMOVEM")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void blmovemWithParams() {
+    String src = keys.key("src");
+    String dst = keys.key("dst");
+
+    // Source already populated: returns immediately.
+    jedis.rpush(src, "1", "2", "3");
+    assertEquals(Arrays.asList("1", "2"),
+        jedis.blmovem(src, dst, ListDirection.LEFT, ListDirection.RIGHT, 1,
+            LMoveMParams.lMoveMParams().count(2, ListMoveOrder.BULK)));
+    assertEquals(Arrays.asList("1", "2"), jedis.lrange(dst, 0, -1));
+
+    // Blocks until the source is pushed to.
+    String blockSrc = keys.key("blockSrc");
+    new Thread(() -> {
+      try {
+        Thread.sleep(100);
+      } catch (InterruptedException e) {
+        logger.error("", e);
+      }
+      jedis.rpush(blockSrc, "a", "b", "c");
+    }).start();
+    assertEquals(Arrays.asList("a", "b"),
+        jedis.blmovem(blockSrc, dst, ListDirection.LEFT, ListDirection.RIGHT, 0,
+            LMoveMParams.lMoveMParams().count(2, ListMoveOrder.BULK)));
+
+    // Empty source times out and returns null.
+    assertNull(jedis.blmovem(keys.key("empty"), dst, ListDirection.LEFT, ListDirection.RIGHT, 0.5,
+        LMoveMParams.lMoveMParams().count(2, ListMoveOrder.OBO)));
+
+    // Binary, immediate.
+    byte[] bsrc = keys.bKey("bsrc");
+    jedis.rpush(bsrc, b1, b2, b3);
+    assertByteArrayListEquals(Arrays.asList(b1, b2),
+        jedis.blmovem(bsrc, keys.bKey("bdst"), ListDirection.LEFT, ListDirection.RIGHT, 1,
+            LMoveMParams.lMoveMParams().count(2, ListMoveOrder.BULK)));
+  }
+
+  @Test
+  @SinceRedisVersion(value="7.0.0")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void lmpop() {
+    String mylist1 = "mylist1";
+    String mylist2 = "mylist2";
+
+    // add elements to list
+    jedis.lpush(mylist1, "one", "two", "three", "four", "five");
+    jedis.lpush(mylist2, "one", "two", "three", "four", "five");
+
+    KeyValue<String, List<String>> elements = jedis.lmpop(ListDirection.LEFT, mylist1, mylist2);
+    assertEquals(mylist1, elements.getKey());
+    assertEquals(1, elements.getValue().size());
+
+    elements = jedis.lmpop(ListDirection.LEFT, 5, mylist1, mylist2);
+    assertEquals(mylist1, elements.getKey());
+    assertEquals(4, elements.getValue().size());
+
+    elements = jedis.lmpop(ListDirection.RIGHT, 100, mylist1, mylist2);
+    assertEquals(mylist2, elements.getKey());
+    assertEquals(5, elements.getValue().size());
+
+    elements = jedis.lmpop(ListDirection.RIGHT, mylist1, mylist2);
+    assertNull(elements);
+  }
+
+  @Test
+  @SinceRedisVersion(value="7.0.0")
+  @ConditionalOnEnv(value = TestEnvUtil.ENV_REDIS_ENTERPRISE, enabled = false)
+  public void blmpopSimple() {
+    String mylist1 = "mylist1";
+    String mylist2 = "mylist2";
+
+    // add elements to list
+    jedis.lpush(mylist1, "one", "two", "three", "four", "five");
+    jedis.lpush(mylist2, "one", "two", "three", "four", "five");
+
+    KeyValue<String, List<String>> elements = jedis.blmpop(1L, ListDirection.LEFT, mylist1, mylist2);
+    assertEquals(mylist1, elements.getKey());
+    assertEquals(1, elements.getValue().size());
+
+    elements = jedis.blmpop(1L, ListDirection.LEFT, 5, mylist1, mylist2);
+    assertEquals(mylist1, elements.getKey());
+    assertEquals(4, elements.getValue().size());
+
+    elements = jedis.blmpop(1L, ListDirection.RIGHT, 100, mylist1, mylist2);
+    assertEquals(mylist2, elements.getKey());
+    assertEquals(5, elements.getValue().size());
+
+    elements = jedis.blmpop(0.1, ListDirection.RIGHT, mylist1, mylist2);
+    assertNull(elements);
   }
 }

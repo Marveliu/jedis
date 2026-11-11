@@ -1,6 +1,7 @@
 package redis.clients.jedis.commands;
 
 import java.util.List;
+import redis.clients.jedis.CommandArguments;
 import redis.clients.jedis.resps.AccessControlUser;
 
 /**
@@ -53,6 +54,11 @@ public interface AccessControlLogBinaryCommands {
    */
   List<byte[]> aclUsersBinary();
 
+  /**
+   * The command returns all the rules defined for an existing ACL user.
+   * @param name username
+   * @return a list of ACL rule definitions for the user.
+   */
   AccessControlUser aclGetUser(byte[] name);
 
   /**
@@ -68,30 +74,20 @@ public interface AccessControlLogBinaryCommands {
    * Create an ACL for the specified user, while specifying the rules.
    *
    * @param name user who receives an acl
-   * @param keys the acl rules for the specified user
+   * @param rules the acl rules for the specified user
    * @see <a href="https://redis.io/commands/acl-setuser">ACL SETUSER</a>
    * @return A string containing OK on success
    */
-  String aclSetUser(byte[] name, byte[]... keys);
+  String aclSetUser(byte[] name, byte[]... rules);
 
   /**
    * Delete the specified user, from the ACL.
    *
-   * @param name The username to delete
+   * @param names The username to delete
    * @see <a href="https://redis.io/commands/acl-deluser">ACL DELUSER</a>
    * @return The number of users delete
    */
-  long aclDelUser(byte[] name);
-
-  /**
-   * Delete the specified users, from the ACL.
-   *
-   * @param name The username to delete
-   * @param names Other usernames to delete
-   * @see <a href="https://redis.io/commands/acl-deluser">ACL DELUSER</a>
-   * @return The number of users delete
-   */
-  long aclDelUser(byte[] name, byte[]... names);
+  long aclDelUser(byte[]... names);
 
   /**
    * Show the available ACL categories.
@@ -109,23 +105,6 @@ public interface AccessControlLogBinaryCommands {
    * @return the available ACL categories
    */
   List<byte[]> aclCat(byte[] category);
-
-  /**
-   * Shows the recent ACL security events.
-   *
-   * @see <a href="https://redis.io/commands/acl-log">ACL LOG</a>
-   * @return The list of recent security events
-   */
-  List<byte[]> aclLogBinary();
-
-  /**
-   * Shows the recent limit ACL security events.
-   *
-   * @param limit The number of results to return
-   * @see <a href="https://redis.io/commands/acl-log">ACL LOG</a>
-   * @return The list of recent security events
-   */
-  List<byte[]> aclLogBinary(int limit);
 
   /**
    * Reset the script event log
@@ -151,4 +130,8 @@ public interface AccessControlLogBinaryCommands {
    * @return OK on success
    */
   String aclSave();
+
+  byte[] aclDryRunBinary(byte[] username, byte[] command, byte[]... args);
+
+  byte[] aclDryRunBinary(byte[] username, CommandArguments commandArgs);
 }

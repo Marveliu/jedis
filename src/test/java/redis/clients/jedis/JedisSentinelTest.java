@@ -1,41 +1,48 @@
 package redis.clients.jedis;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
-
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import redis.clients.jedis.exceptions.JedisDataException;
 import redis.clients.jedis.util.JedisSentinelTestUtil;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+
+@Tag("integration")
 public class JedisSentinelTest {
 
   private static final String MASTER_NAME = "mymaster";
   private static final String MONITOR_MASTER_NAME = "mymastermonitor";
   private static final String REMOVE_MASTER_NAME = "mymasterremove";
   private static final String FAILOVER_MASTER_NAME = "mymasterfailover";
-  private static final String MASTER_IP = "127.0.0.1";
 
-  protected static HostAndPort master = HostAndPorts.getRedisServers().get(0);
-  protected static HostAndPort slave = HostAndPorts.getRedisServers().get(4);
-  protected static HostAndPort sentinel = HostAndPorts.getSentinelServers().get(0);
+  protected static EndpointConfig master;
+  protected static HostAndPort sentinel;
 
-  protected static HostAndPort sentinelForFailover = HostAndPorts.getSentinelServers().get(2);
-  protected static HostAndPort masterForFailover = HostAndPorts.getRedisServers().get(5);
+  protected static HostAndPort sentinelForFailover;
 
-  @Before
+  @BeforeAll
+  public static void prepare() {
+    master = Endpoints.getRedisEndpoint("standalone2-primary");
+    sentinel = Endpoints.getRedisEndpoint("sentinel-standalone2-1").getHostAndPort();
+    sentinelForFailover = Endpoints.getRedisEndpoint("sentinel-failover").getHostAndPort();
+  }
+
+  @BeforeEach
   public void setup() throws InterruptedException {
   }
 
-  @After
+  @AfterEach
   public void clear() throws InterruptedException {
     // New Sentinel (after 2.8.1)
     // when slave promoted to master (slave of no one), New Sentinel force
@@ -62,11 +69,10 @@ public class JedisSentinelTest {
       List<String> masterHostAndPort = j.sentinelGetMasterAddrByName(MASTER_NAME);
       HostAndPort masterFromSentinel = new HostAndPort(masterHostAndPort.get(0),
           Integer.parseInt(masterHostAndPort.get(1)));
-//      assertEquals(master, masterFromSentinel);
       assertEquals(master.getPort(), masterFromSentinel.getPort());
 
       List<Map<String, String>> slaves = j.sentinelReplicas(MASTER_NAME);
-      assertTrue(!slaves.isEmpty());
+      assertFalse(slaves.isEmpty());
       assertEquals(master.getPort(), Integer.parseInt(slaves.get(0).get("master-port")));
 
       // DO NOT RE-RUN TEST TOO FAST, RESET TAKES SOME TIME TO... RESET
@@ -106,12 +112,12 @@ public class JedisSentinelTest {
 
     try {
       // monitor new master
-      String result = j.sentinelMonitor(MONITOR_MASTER_NAME, MASTER_IP, master.getPort(), 1);
+      String result = j.sentinelMonitor(MONITOR_MASTER_NAME, master.getHost(), master.getPort(), 1);
       assertEquals("OK", result);
 
       // already monitored
       try {
-        j.sentinelMonitor(MONITOR_MASTER_NAME, MASTER_IP, master.getPort(), 1);
+        j.sentinelMonitor(MONITOR_MASTER_NAME, master.getHost(), master.getPort(), 1);
         fail();
       } catch (JedisDataException e) {
         // pass
@@ -126,7 +132,7 @@ public class JedisSentinelTest {
     Jedis j = new Jedis(sentinel);
 
     try {
-      ensureMonitored(sentinel, REMOVE_MASTER_NAME, MASTER_IP, master.getPort(), 1);
+      ensureMonitored(sentinel, REMOVE_MASTER_NAME, master.getHost(), master.getPort(), 1);
 
       String result = j.sentinelRemove(REMOVE_MASTER_NAME);
       assertEquals("OK", result);
@@ -173,12 +179,11 @@ public class JedisSentinelTest {
 
   private void ensureMonitored(HostAndPort sentinel, String masterName, String ip, int port,
       int quorum) {
-    Jedis j = new Jedis(sentinel);
-    try {
+
+    try (Jedis j = new Jedis(sentinel)) {
       j.sentinelMonitor(masterName, ip, port, quorum);
     } catch (JedisDataException e) {
-    } finally {
-      j.close();
+      // ignore
     }
   }
 

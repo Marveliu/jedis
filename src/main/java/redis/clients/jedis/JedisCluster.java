@@ -4,25 +4,75 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
-import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
-import redis.clients.jedis.executors.ClusterCommandExecutor;
+import java.util.concurrent.ExecutorService;
 
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
+
+import redis.clients.jedis.annots.Experimental;
+import redis.clients.jedis.builders.ClusterClientBuilder;
+import redis.clients.jedis.executors.ClusterCommandExecutor;
+import redis.clients.jedis.executors.CommandExecutor;
+import redis.clients.jedis.providers.ClusterConnectionProvider;
+import redis.clients.jedis.csc.Cache;
+import redis.clients.jedis.csc.CacheConfig;
+import redis.clients.jedis.csc.CacheFactory;
+import redis.clients.jedis.providers.ConnectionProvider;
+import redis.clients.jedis.util.JedisClusterCRC16;
+
+/**
+ * JedisCluster is a client for Redis Cluster deployments.
+ *
+ * @deprecated Use {@link RedisClusterClient} instead. RedisClusterClient provides the same functionality
+ *             with a cleaner API and simplified constructor options. For basic usage, simple
+ *             constructors are available. For advanced configuration, use {@link RedisClusterClient#builder()}.
+ */
+@Deprecated
 public class JedisCluster extends UnifiedJedis {
+
+  public static final String INIT_NO_ERROR_PROPERTY = "jedis.cluster.initNoError";
 
   /**
    * Default timeout in milliseconds.
    */
   public static final int DEFAULT_TIMEOUT = 2000;
+
+  /**
+   * Default amount of attempts for executing a command
+   */
   public static final int DEFAULT_MAX_ATTEMPTS = 5;
 
+  private final CommandFlagsRegistry commandFlagsRegistry;
+
+  /**
+   * Creates a JedisCluster instance. The provided node is used to make the first contact with the cluster.
+   * <p>
+   * Here, the default timeout of {@value redis.clients.jedis.JedisCluster#DEFAULT_TIMEOUT} ms is being used with
+   * {@value redis.clients.jedis.JedisCluster#DEFAULT_MAX_ATTEMPTS} maximum attempts.
+   * @param node Node to first connect to.
+   */
   public JedisCluster(HostAndPort node) {
     this(Collections.singleton(node));
   }
 
+  /**
+   * Creates a JedisCluster instance. The provided node is used to make the first contact with the cluster.
+   * <p>
+   * Here, the default timeout of {@value redis.clients.jedis.JedisCluster#DEFAULT_TIMEOUT} ms is being used with
+   * {@value redis.clients.jedis.JedisCluster#DEFAULT_MAX_ATTEMPTS} maximum attempts.
+   * @param node Node to first connect to.
+   * @param timeout connection and socket timeout in milliseconds.
+   */
   public JedisCluster(HostAndPort node, int timeout) {
     this(Collections.singleton(node), timeout);
   }
 
+  /**
+   * Creates a JedisCluster instance. The provided node is used to make the first contact with the cluster.<br>
+   * You can specify the timeout and the maximum attempts.
+   * @param node Node to first connect to.
+   * @param timeout connection and socket timeout in milliseconds.
+   * @param maxAttempts maximum attempts for executing a command.
+   */
   public JedisCluster(HostAndPort node, int timeout, int maxAttempts) {
     this(Collections.singleton(node), timeout, maxAttempts);
   }
@@ -83,20 +133,48 @@ public class JedisCluster extends UnifiedJedis {
     this(Collections.singleton(node), clientConfig, maxAttempts, poolConfig);
   }
 
+  /**
+   * Creates a JedisCluster with multiple entry points.
+   * <p>
+   * Here, the default timeout of {@value redis.clients.jedis.JedisCluster#DEFAULT_TIMEOUT} ms is being used with
+   * {@value redis.clients.jedis.JedisCluster#DEFAULT_MAX_ATTEMPTS} maximum attempts.
+   * @param nodes Nodes to connect to.
+   */
   public JedisCluster(Set<HostAndPort> nodes) {
     this(nodes, DEFAULT_TIMEOUT);
   }
 
+  /**
+   * Creates a JedisCluster with multiple entry points.
+   * <p>
+   * Here, the default timeout of {@value redis.clients.jedis.JedisCluster#DEFAULT_TIMEOUT} ms is being used with
+   * {@value redis.clients.jedis.JedisCluster#DEFAULT_MAX_ATTEMPTS} maximum attempts.
+   * @param nodes Nodes to connect to.
+   * @param timeout connection and socket timeout in milliseconds.
+   */
   public JedisCluster(Set<HostAndPort> nodes, int timeout) {
     this(nodes, DefaultJedisClientConfig.builder().timeoutMillis(timeout).build());
   }
 
+  /**
+   * Creates a JedisCluster with multiple entry points.<br>
+   * You can specify the timeout and the maximum attempts.
+   * @param nodes Nodes to connect to.
+   * @param timeout connection and socket timeout in milliseconds.
+   * @param maxAttempts maximum attempts for executing a command.
+   */
   public JedisCluster(Set<HostAndPort> nodes, int timeout, int maxAttempts) {
     this(nodes, DefaultJedisClientConfig.builder().timeoutMillis(timeout).build(), maxAttempts);
   }
 
   public JedisCluster(Set<HostAndPort> nodes, String user, String password) {
     this(nodes, DefaultJedisClientConfig.builder().user(user).password(password).build());
+  }
+
+  public JedisCluster(Set<HostAndPort> nodes, String user, String password,
+      HostAndPortMapper hostAndPortMap) {
+    this(nodes, DefaultJedisClientConfig.builder().user(user).password(password)
+        .hostAndPortMapper(hostAndPortMap).build());
   }
 
   public JedisCluster(Set<HostAndPort> nodes, final GenericObjectPoolConfig<Connection> poolConfig) {
@@ -123,8 +201,8 @@ public class JedisCluster extends UnifiedJedis {
     this(clusterNodes, connectionTimeout, soTimeout, maxAttempts, password, null, poolConfig);
   }
 
-  public JedisCluster(Set<HostAndPort> clusterNodes, int connectionTimeout,
-      int soTimeout, int maxAttempts, String password, String clientName,
+  public JedisCluster(Set<HostAndPort> clusterNodes, int connectionTimeout, int soTimeout,
+      int maxAttempts, String password, String clientName,
       GenericObjectPoolConfig<Connection> poolConfig) {
     this(clusterNodes, connectionTimeout, soTimeout, maxAttempts, null, password, clientName,
         poolConfig);
@@ -138,9 +216,9 @@ public class JedisCluster extends UnifiedJedis {
         maxAttempts, poolConfig);
   }
 
-  public JedisCluster(Set<HostAndPort> clusterNodes, int connectionTimeout,
-      int soTimeout, int infiniteSoTimeout, int maxAttempts, String user, String password,
-      String clientName, GenericObjectPoolConfig<Connection> poolConfig) {
+  public JedisCluster(Set<HostAndPort> clusterNodes, int connectionTimeout, int soTimeout,
+      int infiniteSoTimeout, int maxAttempts, String user, String password, String clientName,
+      GenericObjectPoolConfig<Connection> poolConfig) {
     this(clusterNodes, DefaultJedisClientConfig.builder().connectionTimeoutMillis(connectionTimeout)
         .socketTimeoutMillis(soTimeout).blockingSocketTimeoutMillis(infiniteSoTimeout)
         .user(user).password(password).clientName(clientName).build(), maxAttempts, poolConfig);
@@ -161,34 +239,267 @@ public class JedisCluster extends UnifiedJedis {
         maxAttempts, poolConfig);
   }
 
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig) {
+    this(clusterNodes, clientConfig, DEFAULT_MAX_ATTEMPTS);
+  }
+
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, int maxAttempts) {
+    this(clusterNodes, clientConfig, maxAttempts,
+        Duration.ofMillis((long) clientConfig.getSocketTimeoutMillis() * maxAttempts));
+  }
+
+  /**
+   * Creates a JedisCluster with multiple entry points.<br>
+   * You can specify the timeout and the maximum attempts.<br>
+   *
+   * Additionally, you are free to provide a {@link JedisClientConfig} instance.<br>
+   * You can use the {@link DefaultJedisClientConfig#builder()} builder pattern to customize your configuration, including socket timeouts,
+   * username and passwords as well as SSL related parameters.
+   *
+   * @param clusterNodes Nodes to connect to.
+   * @param clientConfig Client configuration parameters.
+   * @param maxAttempts maximum attempts for executing a command.
+   * @param maxTotalRetriesDuration Maximum time used for reconnecting.
+   */
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, int maxAttempts,
+      Duration maxTotalRetriesDuration) {
+    this(new ClusterConnectionProvider(clusterNodes, clientConfig), maxAttempts, maxTotalRetriesDuration,
+        clientConfig);
+  }
+
   public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig,
-      int maxAttempts, GenericObjectPoolConfig<Connection> poolConfig) {
+      GenericObjectPoolConfig<Connection> poolConfig) {
+    this(clusterNodes, clientConfig, DEFAULT_MAX_ATTEMPTS, poolConfig);
+  }
+
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, int maxAttempts,
+      GenericObjectPoolConfig<Connection> poolConfig) {
     this(clusterNodes, clientConfig, maxAttempts,
         Duration.ofMillis((long) clientConfig.getSocketTimeoutMillis() * maxAttempts), poolConfig);
   }
 
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, int maxAttempts,
+      Duration maxTotalRetriesDuration, GenericObjectPoolConfig<Connection> poolConfig) {
+    this(new ClusterConnectionProvider(clusterNodes, clientConfig, poolConfig), maxAttempts, maxTotalRetriesDuration,
+        clientConfig);
+  }
+
   public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig,
+      GenericObjectPoolConfig<Connection> poolConfig, Duration topologyRefreshPeriod, int maxAttempts,
+      Duration maxTotalRetriesDuration) {
+    this(new ClusterConnectionProvider(clusterNodes, clientConfig, poolConfig, topologyRefreshPeriod),
+        maxAttempts, maxTotalRetriesDuration, clientConfig);
+  }
+
+  // Uses a fetched connection to process protocol. Should be avoided if possible.
+  public JedisCluster(ClusterConnectionProvider provider, int maxAttempts,
+      Duration maxTotalRetriesDuration) {
+    super(new ClusterCommandExecutor(provider, maxAttempts, maxTotalRetriesDuration,
+        StaticCommandFlagsRegistry.registry()), provider, (RedisProtocol) null, null);
+    this.commandFlagsRegistry = StaticCommandFlagsRegistry.registry();
+  }
+
+  private JedisCluster(ClusterConnectionProvider provider, int maxAttempts,
+      Duration maxTotalRetriesDuration, JedisClientConfig clientConfig) {
+    super(new ClusterCommandExecutor(provider, maxAttempts, maxTotalRetriesDuration,
+            StaticCommandFlagsRegistry.registry()), provider, clientConfig, (Cache) null);
+    this.commandFlagsRegistry = StaticCommandFlagsRegistry.registry();
+  }
+
+  @Experimental
+  public JedisCluster(Set<HostAndPort> hnp, JedisClientConfig jedisClientConfig, CacheConfig cacheConfig) {
+    this(hnp, jedisClientConfig, CacheFactory.getCache(cacheConfig));
+  }
+
+  @Experimental
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, Cache clientSideCache) {
+    this(clusterNodes, clientConfig, clientSideCache, DEFAULT_MAX_ATTEMPTS,
+        Duration.ofMillis(DEFAULT_MAX_ATTEMPTS * clientConfig.getSocketTimeoutMillis()));
+  }
+
+  @Experimental
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, Cache clientSideCache,
+      int maxAttempts, Duration maxTotalRetriesDuration) {
+    this(new ClusterConnectionProvider(clusterNodes, clientConfig, clientSideCache), maxAttempts,
+        maxTotalRetriesDuration, clientConfig, clientSideCache);
+  }
+
+  @Experimental
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, Cache clientSideCache,
       int maxAttempts, Duration maxTotalRetriesDuration, GenericObjectPoolConfig<Connection> poolConfig) {
-    super(clusterNodes, clientConfig, poolConfig, maxAttempts, maxTotalRetriesDuration);
+    this(new ClusterConnectionProvider(clusterNodes, clientConfig, clientSideCache, poolConfig),
+        maxAttempts, maxTotalRetriesDuration, clientConfig, clientSideCache);
   }
 
-  public JedisCluster(Set<HostAndPort> clusterNodess, JedisClientConfig clientConfig) {
-    this(clusterNodess, clientConfig, DEFAULT_MAX_ATTEMPTS);
+  @Experimental
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, Cache clientSideCache,
+      GenericObjectPoolConfig<Connection> poolConfig) {
+    this(new ClusterConnectionProvider(clusterNodes, clientConfig, clientSideCache, poolConfig),
+        DEFAULT_MAX_ATTEMPTS, Duration.ofMillis(DEFAULT_MAX_ATTEMPTS * clientConfig.getSocketTimeoutMillis()),
+        clientConfig, clientSideCache);
   }
 
-  public JedisCluster(Set<HostAndPort> clusterNodess, JedisClientConfig clientConfig, int maxAttempts) {
-    super(clusterNodess, clientConfig, maxAttempts);
+  @Experimental
+  public JedisCluster(Set<HostAndPort> clusterNodes, JedisClientConfig clientConfig, Cache clientSideCache,
+      GenericObjectPoolConfig<Connection> poolConfig, Duration topologyRefreshPeriod, int maxAttempts,
+      Duration maxTotalRetriesDuration) {
+    this(new ClusterConnectionProvider(clusterNodes, clientConfig, clientSideCache, poolConfig, topologyRefreshPeriod),
+        maxAttempts, maxTotalRetriesDuration, clientConfig, clientSideCache);
   }
 
-  public JedisCluster(Set<HostAndPort> clusterNodess, JedisClientConfig clientConfig, int maxAttempts, Duration maxTotalRetriesDuration) {
-    super(clusterNodess, clientConfig, maxAttempts, maxTotalRetriesDuration);
+  @Experimental
+  private JedisCluster(ClusterConnectionProvider provider, int maxAttempts,
+      Duration maxTotalRetriesDuration, JedisClientConfig clientConfig, Cache clientSideCache) {
+    super(new ClusterCommandExecutor(provider, maxAttempts, maxTotalRetriesDuration,
+            StaticCommandFlagsRegistry.registry()), provider, clientConfig, clientSideCache);
+    this.commandFlagsRegistry = StaticCommandFlagsRegistry.registry();
   }
 
+  private JedisCluster(CommandExecutor commandExecutor, ConnectionProvider connectionProvider,
+      JedisClientConfig clientConfig, Cache cache, CommandFlagsRegistry commandFlagsRegistry) {
+    super(commandExecutor, connectionProvider, clientConfig, cache);
+    this.commandFlagsRegistry = commandFlagsRegistry;
+  }
+
+  @Override
+  protected CommandObjects newCommandObjects(RedisProtocol protocol) {
+    return new ClusterCommandObjects(protocol);
+  }
+
+  /**
+   * Fluent builder for {@link JedisCluster} (Redis Cluster).
+   * <p>
+   * Obtain an instance via {@link #builder()}.
+   * </p>
+   */
+  static public class Builder extends ClusterClientBuilder<JedisCluster> {
+
+    @Override
+    protected JedisCluster createClient() {
+      return new JedisCluster(commandExecutor, connectionProvider, clientConfig, cache,
+          getCommandFlags());
+    }
+  }
+
+  /**
+   * Create a new builder for configuring JedisCluster instances.
+   * @return a new {@link JedisCluster.Builder} instance
+   */
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  /**
+   * Returns all nodes that were configured to connect to in key-value pairs ({@link Map}).<br>
+   * Key is the HOST:PORT and the value is the connection pool.
+   * @return the map of all connections.
+   */
   public Map<String, ConnectionPool> getClusterNodes() {
-    return ((ClusterCommandExecutor) executor).provider.getNodes();
+    return ((ClusterConnectionProvider) provider).getNodes();
   }
 
+  /**
+   * Returns the connection for one of the 16,384 slots.
+   * @param slot the slot to retrieve the connection for.
+   * @return connection of the provided slot. {@code close()} of this connection must be called after use.
+   */
   public Connection getConnectionFromSlot(int slot) {
-    return ((ClusterCommandExecutor) executor).provider.getConnectionFromSlot(slot);
+    return ((ClusterConnectionProvider) provider).getConnectionFromSlot(slot);
+  }
+
+  /**
+   * Forces an immediate refresh of the in-memory Redis Cluster topology
+   * (node map, primary and replica slot assignments).
+   * <p>
+   * Useful before {@link #getConnectionFromSlot(int)} when stale topology is
+   * detected outside the command retry path. Best-effort; a no-op if a refresh
+   * is already in progress.
+   */
+  public void refreshClusterTopology() {
+    ((ClusterConnectionProvider) provider).renewSlotCache();
+  }
+
+  // commands
+  public long spublish(String channel, String message) {
+    return executeCommand(commandObjects.spublish(channel, message));
+  }
+
+  public long spublish(byte[] channel, byte[] message) {
+    return executeCommand(commandObjects.spublish(channel, message));
+  }
+
+  public void ssubscribe(final JedisShardedPubSub jedisPubSub, final String... channels) {
+    try (Connection connection = getConnectionFromSlot(JedisClusterCRC16.getSlot(channels[0]))) {
+      jedisPubSub.proceed(connection, channels);
+    }
+  }
+
+  public void ssubscribe(BinaryJedisShardedPubSub jedisPubSub, final byte[]... channels) {
+    try (Connection connection = getConnectionFromSlot(JedisClusterCRC16.getSlot(channels[0]))) {
+      jedisPubSub.proceed(connection, channels);
+    }
+  }
+  // commands
+
+  /**
+   * Creates a new pipeline for executing commands in a Redis Cluster.
+   *
+   * <p>Pipelining allows batching multiple commands for more efficient execution
+   * by reducing network round-trips. In a cluster environment, commands are routed
+   * to the appropriate nodes based on key hash slots.</p>
+   *
+   * <p>If the pipeline spans multiple nodes, a dedicated {@link ExecutorService} is
+   * created internally to execute requests in parallel and shutdown when the pipeline
+   * is synced.</p>
+   *
+   * @return a new {@link ClusterPipeline} instance
+   * @see #pipelined(ExecutorService)
+   */
+  @Override
+  public ClusterPipeline pipelined() {
+    return pipelined(null);
+  }
+
+  /**
+   * Creates a new pipeline for executing commands in a Redis Cluster using the provided executor.
+   *
+   * <p>Pipelining allows batching multiple commands for more efficient execution
+   * by reducing network round-trips. In a cluster environment, commands are routed
+   * to the appropriate nodes based on key hash slots.</p>
+   *
+   * <p>If the pipeline spans multiple nodes, the provided {@link ExecutorService} is
+   * used to execute requests in parallel. The caller is responsible for managing
+   * the lifecycle of this executor (creation, shutdown, etc.).</p>
+   *
+   * <p>If {@code null} is provided, a dedicated executor is created and managed
+   * internally, similar to {@link #pipelined()}.</p>
+   *
+   * @param executorService the executor to use for multi-node execution, or {@code null}
+   * @return a new {@link ClusterPipeline} instance
+   */
+  public ClusterPipeline pipelined(ExecutorService executorService) {
+    return new ClusterPipeline(
+            (ClusterConnectionProvider) provider,
+            (ClusterCommandObjects) commandObjects,
+            commandFlagsRegistry,
+            executorService
+    );
+  }
+
+  /**
+   * @param doMulti param
+   * @return nothing
+   * @throws UnsupportedOperationException
+   */
+  @Override
+  public AbstractTransaction transaction(boolean doMulti) {
+    throw new UnsupportedOperationException();
+  }
+
+  public final <T> T executeCommandToReplica(CommandObject<T> commandObject) {
+    if (!(executor instanceof ClusterCommandExecutor)) {
+      throw new UnsupportedOperationException("Support only execute to replica in ClusterCommandExecutor");
+    }
+    return ((ClusterCommandExecutor) executor).executeCommandToReplica(commandObject);
   }
 }

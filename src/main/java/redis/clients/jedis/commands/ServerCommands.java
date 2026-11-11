@@ -1,8 +1,19 @@
 package redis.clients.jedis.commands;
 
 import redis.clients.jedis.args.FlushMode;
+import redis.clients.jedis.args.LatencyEvent;
 import redis.clients.jedis.args.SaveMode;
 import redis.clients.jedis.exceptions.JedisException;
+import redis.clients.jedis.params.HotkeysParams;
+import redis.clients.jedis.params.LolwutParams;
+import redis.clients.jedis.params.ShutdownParams;
+import redis.clients.jedis.resps.HotkeysInfo;
+import redis.clients.jedis.resps.LatencyHistoryInfo;
+import redis.clients.jedis.resps.LatencyLatestInfo;
+import redis.clients.jedis.util.KeyValue;
+
+import java.util.List;
+import java.util.Map;
 
 public interface ServerCommands {
 
@@ -19,18 +30,19 @@ public interface ServerCommands {
   byte[] echo(byte[] arg);
 
   /**
-   * Ask the server to close the connection. The connection is closed as soon as all pending replies
-   * have been written to the client.
-   * @return OK
-   */
-  String quit();
-
-  /**
    * Delete all the keys of the currently selected DB. This command never fails. The time-complexity
    * for this operation is O(N), N being the number of keys in the database.
    * @return OK
    */
   String flushDB();
+
+  /**
+   * Delete all the keys of the currently selected DB. This command never fails. The time-complexity
+   * for this operation is O(N), N being the number of keys in the database.
+   * @param flushMode can be SYNC or ASYNC
+   * @return OK
+   */
+  String flushDB(FlushMode flushMode);
 
   /**
    * Delete all the keys of all the existing databases, not just the currently selected one.
@@ -40,7 +52,7 @@ public interface ServerCommands {
 
   /**
    * Delete all the keys of all the existing databases, not just the currently selected one.
-   * @param flushMode
+   * @param flushMode SYNC or ASYNC
    * @return a simple string reply (OK)
    */
   String flushAll(FlushMode flushMode);
@@ -51,7 +63,6 @@ public interface ServerCommands {
    * requirepass directive in the configuration file. If password matches the password in the
    * configuration file, the server replies with the OK status code and starts accepting commands.
    * Otherwise, an error is returned and the clients needs to try a new password.
-   * @param password
    * @return the result of the auth
    */
   String auth(String password);
@@ -59,8 +70,6 @@ public interface ServerCommands {
   /**
    * Request for authentication with username and password, based on the ACL feature introduced in
    * Redis 6.0 see https://redis.io/topics/acl
-   * @param user
-   * @param password
    * @return OK
    */
   String auth(String user, String password);
@@ -69,7 +78,7 @@ public interface ServerCommands {
    * The SAVE commands performs a synchronous save of the dataset producing a point in time snapshot
    * of all the data inside the Redis instance, in the form of an RDB file. You almost never want to
    * call SAVE in production environments where it will block all the other clients. Instead usually
-   * BGSAVE is used. However in case of issues preventing Redis to create the background saving
+   * BGSAVE is used. However, in case of issues preventing Redis to create the background saving
    * child (for instance errors in the fork(2) system call), the SAVE command can be a good last
    * resort to perform the dump of the latest dataset.
    * @return result of the save
@@ -83,6 +92,8 @@ public interface ServerCommands {
    * @return ok
    */
   String bgsave();
+
+  String bgsaveSchedule();
 
   /**
    * Instruct Redis to start an Append Only File rewrite process. The rewrite will create a small
@@ -113,13 +124,18 @@ public interface ServerCommands {
    */
   void shutdown() throws JedisException;
 
+  default void shutdown(SaveMode saveMode) throws JedisException {
+    shutdown(ShutdownParams.shutdownParams().saveMode(saveMode));
+  }
+
   /**
    * @see SaveMode
-   * @param saveMode modifier to alter the data save behavior of SHUTDOWN. {@code null} would
-   * trigger the default behavior.
+   * @param shutdownParams set commands parameters
    * @throws JedisException
    */
-  void shutdown(SaveMode saveMode) throws JedisException;
+  void shutdown(ShutdownParams shutdownParams) throws JedisException;
+
+  String shutdownAbort();
 
   /**
    * The INFO command returns information and statistics about the server in a format that is simple
@@ -150,7 +166,9 @@ public interface ServerCommands {
    * @param host listening at the specified hostname
    * @param port server listening at the specified port
    * @return result of the command.
+   * @deprecated Use {@link ServerCommands#replicaof(java.lang.String, int)}.
    */
+  @Deprecated
   String slaveof(String host, int port);
 
   /**
@@ -159,11 +177,34 @@ public interface ServerCommands {
    * master and set the application to use this new master in read/write. Later when the other Redis
    * server is fixed, it can be reconfigured to work as a slave.
    * @return result of the command
+   * @deprecated Use {@link ServerCommands#replicaofNoOne()}.
    */
+  @Deprecated
   String slaveofNoOne();
 
   /**
-   * Syncrhonous replication of Redis as described here: http://antirez.com/news/66.
+   * The REPLICAOF command can change the replication settings of a replica on the fly. In the
+   * proper form REPLICAOF hostname port will make the server a replica of another server
+   * listening at the specified hostname and port. If a server is already a replica of some master,
+   * REPLICAOF hostname port will stop the replication against the old server and start the
+   * synchronization against the new one, discarding the old dataset.
+   * @param host listening at the specified hostname
+   * @param port server listening at the specified port
+   * @return result of the command.
+   */
+  String replicaof(String host, int port);
+
+  /**
+   * REPLICAOF NO ONE will stop replication, turning the server into a MASTER, but will not discard
+   * the replication. So, if the old master stops working, it is possible to turn the replica into
+   * a master and set the application to use this new master in read/write. Later when the other
+   * Redis server is fixed, it can be reconfigured to work as a replica.
+   * @return result of the command
+   */
+  String replicaofNoOne();
+
+  /**
+   * Synchronous replication of Redis as described here: http://antirez.com/news/66.
    * <p>
    * Blocks until all the previous write commands are successfully transferred and acknowledged by
    * at least the specified number of replicas. If the timeout, specified in milliseconds, is
@@ -177,4 +218,98 @@ public interface ServerCommands {
    *         current connection
    */
   long waitReplicas(int replicas, long timeout);
+
+  /**
+   * Blocks the current client until all the previous write commands are acknowledged as having been
+   * fsynced to the AOF of the local Redis and/or at least the specified number of replicas.
+   * <a href="https://redis.io/commands/waitaof/">Redis Documentation</a>
+   * @param numLocal Number of local instances that are required to acknowledge the sync (0 or 1),
+   *                 cannot be non-zero if the local Redis does not have AOF enabled
+   * @param numReplicas Number of replicas that are required to acknowledge the sync
+   * @param timeout Timeout in millis of the operation - if 0 timeout is unlimited. If the timeout is reached,
+   *                the command returns even if the specified number of acknowledgments has not been met.
+   * @return KeyValue where Key is number of local Redises (0 or 1) that have fsynced to AOF all writes
+   * performed in the context of the current connection, and the value is the number of replicas that have acknowledged doing the same.
+   */
+  KeyValue<Long, Long> waitAOF(long numLocal, long numReplicas, long timeout);
+
+  String lolwut();
+
+  String lolwut(LolwutParams lolwutParams);
+
+  String reset();
+
+  /**
+   * The LATENCY DOCTOR command reports about different latency-related issues and advises about
+   * possible remedies.
+   * <p>
+   * This command is the most powerful analysis tool in the latency monitoring framework, and is
+   * able to provide additional statistical data like the average period between latency spikes, the
+   * median deviation, and a human-readable analysis of the event. For certain events, like fork,
+   * additional information is provided, like the rate at which the system forks processes.
+   * <p>
+   * This is the output you should post in the Redis mailing list if you are looking for help about
+   * Latency related issues.
+   *
+   * @return the report
+   */
+  String latencyDoctor();
+
+  Map<String, LatencyLatestInfo> latencyLatest();
+
+  List<LatencyHistoryInfo> latencyHistory(LatencyEvent events);
+
+  long latencyReset(LatencyEvent... events);
+
+  /**
+   * Start hotkey tracking with the specified parameters.
+   * <p>
+   * The HOTKEYS command is used to identify hot keys in your Redis instance by tracking
+   * keys by CPU time consumption and network bytes transferred.
+   * <p>
+   * <b>Note: This command is not supported in Redis Cluster mode.</b> HOTKEYS is a node-local
+   * operation and there is no built-in mechanism to aggregate hotkeys data across cluster nodes.
+   * Calling this method on a cluster client will throw {@link UnsupportedOperationException}.
+   * To use HOTKEYS in a cluster, connect directly to individual nodes.
+   *
+   * @param params the parameters for hotkey tracking (metrics, count, duration, sample)
+   * @return OK
+   * @throws UnsupportedOperationException if called on a cluster client
+   */
+  String hotkeysStart(HotkeysParams params);
+
+  /**
+   * Stop hotkey tracking. Data is preserved until RESET or next START.
+   * <p>
+   * <b>Note: This command is not supported in Redis Cluster mode.</b>
+   * See {@link #hotkeysStart(HotkeysParams)} for details.
+   *
+   * @return OK
+   * @throws UnsupportedOperationException if called on a cluster client
+   */
+  String hotkeysStop();
+
+  /**
+   * Clear all collected hotkey data and return to empty state.
+   * <p>
+   * <b>Note: This command is not supported in Redis Cluster mode.</b>
+   * See {@link #hotkeysStart(HotkeysParams)} for details.
+   *
+   * @return OK
+   * @throws UnsupportedOperationException if called on a cluster client
+   */
+  String hotkeysReset();
+
+  /**
+   * Retrieve collected hotkey statistics.
+   * <p>
+   * Returns null if hotkey tracking has never been started.
+   * <p>
+   * <b>Note: This command is not supported in Redis Cluster mode.</b>
+   * See {@link #hotkeysStart(HotkeysParams)} for details.
+   *
+   * @return HotkeysInfo containing tracking statistics, or null if never started
+   * @throws UnsupportedOperationException if called on a cluster client
+   */
+  HotkeysInfo hotkeysGet();
 }

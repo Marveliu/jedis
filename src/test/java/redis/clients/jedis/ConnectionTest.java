@@ -1,43 +1,85 @@
 package redis.clients.jedis;
 
-import org.junit.After;
-import org.junit.Test;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import org.hamcrest.Matchers;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 
+@Tag("integration")
 public class ConnectionTest {
+
+  private static EndpointConfig endpoint;
 
   private Connection client;
 
-  @After
+  @BeforeAll
+  public static void setUp() {
+    endpoint = Endpoints.getRedisEndpoint("standalone0");
+  }
+
+  @AfterEach
   public void tearDown() throws Exception {
     if (client != null) {
       client.close();
     }
   }
 
-  @Test(expected = JedisConnectionException.class)
-  public void checkUnkownHost() {
+  @Test
+  public void checkUnknownHost() {
     client = new Connection("someunknownhost", Protocol.DEFAULT_PORT);
-    client.connect();
+    assertThrows(JedisConnectionException.class, ()->client.connect());
   }
 
-  @Test(expected = JedisConnectionException.class)
+  @Test
   public void checkWrongPort() {
     client = new Connection(Protocol.DEFAULT_HOST, 55665);
-    client.connect();
+    assertThrows(JedisConnectionException.class, ()->client.connect());
   }
 
   @Test
   public void connectIfNotConnectedWhenSettingTimeoutInfinite() {
-    client = new Connection("localhost", 6379);
+    client = new Connection(endpoint.getHost(), endpoint.getPort());
     client.setTimeoutInfinite();
   }
 
   @Test
   public void checkCloseable() {
-    client = new Connection("localhost", 6379);
+    client = new Connection(endpoint.getHost(), endpoint.getPort());
     client.connect();
     client.close();
+  }
+
+  @Test
+  public void checkIdentityString() {
+    client = new Connection(endpoint.getHost(), endpoint.getPort());
+
+    String idString = "id: 0x" + Integer.toHexString(client.hashCode()).toUpperCase();
+
+    String identityString = client.toIdentityString();
+    assertThat(identityString, Matchers.startsWith("Connection{"));
+    assertThat(identityString, Matchers.endsWith("}"));
+    assertThat(identityString, Matchers.containsString(idString));
+
+    client.connect();
+    identityString = client.toIdentityString();
+    assertThat(identityString, Matchers.startsWith("Connection{"));
+    assertThat(identityString, Matchers.endsWith("}"));
+    assertThat(identityString, Matchers.containsString(idString));
+    assertThat(identityString, Matchers.containsString(", L:"));
+    assertThat(identityString, Matchers.containsString(" - R:"));
+
+    client.close();
+    identityString = client.toIdentityString();
+    assertThat(identityString, Matchers.startsWith("Connection{"));
+    assertThat(identityString, Matchers.endsWith("}"));
+    assertThat(identityString, Matchers.containsString(idString));
+    assertThat(identityString, Matchers.containsString(", L:"));
+    assertThat(identityString, Matchers.containsString(" ! R:"));
   }
 }
